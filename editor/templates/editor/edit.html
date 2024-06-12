@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Editor</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/4.4.0/fabric.min.js"></script>
+    <style>
+        body {
+            padding-top: 70px;
+        }
+        .pdf-page-preview {
+            cursor: pointer;
+            margin-bottom: 10px;
+            border: 1px solid #ddd;
+            padding: 5px;
+        }
+        .pdf-page-preview img {
+            width: 100%;
+        }
+        .pdf-page-preview.active {
+            border-color: #007bff;
+        }
+        .canvas-container {
+            position: relative;
+            border: 1px solid black;
+        }
+        .pdf-canvas, .fabric-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .fixed-top {
+            padding: 10px 20px;
+            background-color: #f8f9fa;
+            box-shadow: 0 2px 2px -2px rgba(0, 0, 0, .2);
+        }
+        .fixed-top button {
+            margin-right: 10px;
+        }
+        #pdf-container {
+            margin-top: 20px;
+        }
+        .sidebar {
+            max-height: calc(100vh - 70px);
+            overflow-y: auto;
+        }
+        .font-settings {
+            position: fixed;
+            right: 0;
+            top: 70px;
+            width: 250px;
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-left: 1px solid #ddd;
+            box-shadow: -2px 0 5px -2px rgba(0, 0, 0, .2);
+        }
+    </style>
+</head>
+<body>
+    <div class="fixed-top">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-2">
+                    <h1>PDF Editor</h1>
+                </div>
+                <div class="col-10">
+                    <form id="upload-form" enctype="multipart/form-data">
+                        <input type="file" id="file-input" name="file" accept="application/pdf" class="btn btn-primary">
+                    </form>
+                    <button id="add-text-btn" class="btn btn-secondary"><i class="fas fa-font"></i> Add Text</button>
+                    <button id="edit-text-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Text</button>
+                    <button id="remove-text-btn" class="btn btn-secondary"><i class="fas fa-eraser"></i> Remove Text</button>
+                    <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
+                    <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
+                    <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
+                    <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-draw-polygon"></i> Add Shape</button>
+                    <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
+                    <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <div class="container-fluid" style="margin-top: 80px;">
+        <div class="row">
+            <div class="col-2 sidebar" id="pdf-preview-container"></div>
+            <div class="col-10" id="pdf-container"></div>
+        </div>
+    </div>
+
+    <div class="font-settings" style="margin-top: 80px;">
+        <h5>Font Settings</h5>
+        <div class="form-group">
+            <label for="font-family">Font Family</label>
+            <select id="font-family" class="form-control">
+                <option value="Arial">Arial</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Tahoma">Tahoma</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="font-size">Font Size</label>
+            <input type="number" id="font-size" class="form-control" value="20">
+        </div>
+        <div class="form-group">
+            <label for="font-style">Font Style</label>
+            <select id="font-style" class="form-control">
+                <option value="normal">Normal</option>
+                <option value="italic">Italic</option>
+                <option value="bold">Bold</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="font-color">Font Color</label>
+            <input type="color" id="font-color" class="form-control" value="#000000">
+        </div>
+        <button id="apply-font-settings" class="btn btn-primary">Apply</button>
+    </div>
+
+    <input type="file" id="image-input" accept="image/*" style="display:none;">
+
+    <script>
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        const csrftoken = getCookie('csrftoken');
+
+        let pdfDoc = null;
+        let filePath = '';
+        let edits = {};
+        let currentTool = '';
+        let fabricCanvasInstances = [];
+        let currentPage = 1;
+        let textCounter = 0; // Counter for unique text IDs
+        let imageCounter = 0; // Counter for unique image IDs
+
+        document.getElementById('file-input').addEventListener('change', (event) => {
+            let file = event.target.files[0];
+            let formData = new FormData(document.getElementById('upload-form'));
+
+            fetch('/upload/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken
+                },
+                body: formData
+            }).then(response => response.json()).then(data => {
+                filePath = data.file_path;
+                loadPDF(filePath);
+            });
+        });
+
+        document.getElementById('save-btn').addEventListener('click', () => {
+            let data = {
+                file_path: filePath,
+                edits: edits
+            };
+            fetch('/edit/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify(data)
+            }).then(response => response.json()).then(data => {
+                alert('PDF saved!');
+                window.open(data.new_file_path, '_blank');
+            });
+        });
+
+        document.getElementById('add-text-btn').addEventListener('click', () => {
+            currentTool = 'add_text';
+        });
+
+        document.getElementById('edit-text-btn').addEventListener('click', () => {
+            currentTool = 'edit_text';
+        });
+
+        document.getElementById('remove-text-btn').addEventListener('click', () => {
+            currentTool = 'remove_text';
+        });
+
+        document.getElementById('add-image-btn').addEventListener('click', () => {
+            currentTool = 'add_image';
+            document.getElementById('image-input').click();
+        });
+
+        document.getElementById('edit-image-btn').addEventListener('click', () => {
+            currentTool = 'edit_image';
+        });
+
+        document.getElementById('remove-image-btn').addEventListener('click', () => {
+            currentTool = 'remove_image';
+        });
+
+        document.getElementById('add-rect-btn').addEventListener('click', () => {
+            currentTool = 'add_rect';
+            document.getElementById('color-picker').click();
+        });
+
+        document.getElementById('image-input').addEventListener('change', (event) => {
+            let file = event.target.files[0];
+            let formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload_image/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrftoken
+                },
+                body: formData
+            }).then(response => response.json()).then(data => {
+                let imgElement = document.createElement('img');
+                imgElement.src = data.image_path;
+                addImageToCanvas(imgElement);
+            });
+        });
+
+        document.getElementById('apply-font-settings').addEventListener('click', () => {
+            applyFontSettings();
+        });
+
+        function loadPDF(url) {
+            pdfjsLib.getDocument(url).promise.then((pdfDoc_) => {
+                pdfDoc = pdfDoc_;
+                renderPreviews();
+                renderPage(currentPage);
+            });
+        }
+
+        function renderPreviews() {
+            let previewContainer = document.getElementById('pdf-preview-container');
+            previewContainer.innerHTML = '';
+            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                let canvas = document.createElement('canvas');
+                canvas.className = 'pdf-page-preview';
+                canvas.dataset.pageNum = pageNum;
+                previewContainer.appendChild(canvas);
+                renderPreview(pageNum, canvas);
+            }
+        }
+
+        function renderPreview(pageNum, canvas) {
+            pdfDoc.getPage(pageNum).then((page) => {
+                let viewport = page.getViewport({ scale: 0.2 });
+                let context = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+
+                let renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                };
+                page.render(renderContext).promise.then(() => {
+                    canvas.addEventListener('click', () => {
+                        document.querySelectorAll('.pdf-page-preview').forEach((el) => {
+                            el.classList.remove('active');
+                        });
+                        canvas.classList.add('active');
+                        renderPage(pageNum);
+                    });
+                });
+            });
+        }
+
+        function renderPage(pageNum) {
+            currentPage = pageNum;
+            let pdfContainer = document.getElementById('pdf-container');
+            pdfContainer.innerHTML = '';
+
+            pdfDoc.getPage(pageNum).then((page) => {
+                let viewport = page.getViewport({ scale: 1.5 });
+
+                let pdfCanvas = document.createElement('canvas');
+                pdfCanvas.className = 'pdf-canvas';
+                pdfCanvas.width = viewport.width;
+                pdfCanvas.height = viewport.height;
+                pdfContainer.appendChild(pdfCanvas);
+
+                let fabricCanvas = document.createElement('canvas');
+                fabricCanvas.className = 'fabric-canvas';
+                fabricCanvas.width = viewport.width;
+                fabricCanvas.height = viewport.height;
+                pdfContainer.appendChild(fabricCanvas);
+
+                let pdfContext = pdfCanvas.getContext('2d');
+                let renderContext = {
+                    canvasContext: pdfContext,
+                    viewport: viewport
+                };
+                page.render(renderContext).promise.then(() => {
+                    let fabricCanvasInstance = new fabric.Canvas(fabricCanvas);
+                    fabricCanvasInstances[pageNum - 1] = fabricCanvasInstance;
+                    setupFabricCanvas(fabricCanvasInstance, pageNum, viewport);
+                });
+            });
+        }
+
+        function setupFabricCanvas(fabricCanvas, pageNum, viewport) {
+            fabricCanvas.on('mouse:down', (event) => {
+                if (currentTool === 'add_text') {
+                    textCounter++;
+                    let textId = `text_${textCounter}`;
+                    let text = new fabric.Textbox('Edit text', {
+                        left: event.pointer.x,
+                        top: event.pointer.y,
+                        fontSize: 20,
+                        fill: 'black',
+                        id: textId
+                    });
+                    fabricCanvas.add(text);
+
+                    text.on('editing:exited', function() {
+                        edits[textId] = {
+                            type: 'add_text',
+                            page: pageNum - 1,
+                            x: text.left / viewport.scale,
+                            y: text.top / viewport.scale,
+                            text: text.text,
+                            fontsize: text.fontSize,
+                            font: text.fontFamily,
+                            color: text.fill
+                        };
+                    });
+
+                    edits[textId] = {
+                        type: 'add_text',
+                        page: pageNum - 1,
+                        x: event.pointer.x / viewport.scale,
+                        y: event.pointer.y / viewport.scale,
+                        text: 'Edit text',
+                        fontsize: 20,
+                        font: 'Arial',
+                        color: 'black'
+                    };
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'edit_text') {
+                    let activeObject = fabricCanvas.getActiveObject();
+                    if (activeObject && activeObject.type === 'textbox') {
+                        let newText = prompt("Edit text:", activeObject.text);
+                        if (newText) {
+                            activeObject.text = newText;
+                            let textId = activeObject.id;
+                            edits[textId].text = newText;
+                        }
+                    }
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'remove_text') {
+                    let activeObject = fabricCanvas.getActiveObject();
+                    if (activeObject && activeObject.type === 'textbox') {
+                        let textId = activeObject.id;
+                        delete edits[textId];
+                        fabricCanvas.remove(activeObject);
+                    }
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'add_rect') {
+                    let rectId = `rect_${pageNum}_${event.pointer.x}_${event.pointer.y}`;
+                    let rect = new fabric.Rect({
+                        left: event.pointer.x,
+                        top: event.pointer.y,
+                        fill: document.getElementById('color-picker').value,
+                        width: 100,
+                        height: 50,
+                        id: rectId
+                    });
+                    fabricCanvas.add(rect);
+                    edits[rectId] = {
+                        type: 'add_rect',
+                        page: pageNum - 1,
+                        x: event.pointer.x / viewport.scale,
+                        y: event.pointer.y / viewport.scale,
+                        width: 100 / viewport.scale,
+                        height: 50 / viewport.scale,
+                        color: document.getElementById('color-picker').value
+                    };
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'edit_image') {
+                    let activeObject = fabricCanvas.getActiveObject();
+                    if (activeObject && activeObject.type === 'image') {
+                        let newImageSrc = prompt("Edit image URL:", activeObject._element.src);
+                        if (newImageSrc) {
+                            let imageId = activeObject.id;
+                            edits[imageId].new_image_src = newImageSrc;
+                            fabric.Image.fromURL(newImageSrc, function(img) {
+                                img.set({
+                                    left: activeObject.left,
+                                    top: activeObject.top,
+                                    scaleX: activeObject.scaleX,
+                                    scaleY: activeObject.scaleY
+                                });
+                                fabricCanvas.remove(activeObject);
+                                fabricCanvas.add(img);
+                            });
+                        }
+                    }
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'remove_image') {
+                    let activeObject = fabricCanvas.getActiveObject();
+                    if (activeObject && activeObject.type === 'image') {
+                        let imageId = activeObject.id;
+                        delete edits[imageId];
+                        fabricCanvas.remove(activeObject);
+                    }
+                    currentTool = ''; // Reset tool after use
+                }
+            });
+
+            let movingObject = null;
+            fabricCanvas.on('object:moving', (event) => {
+                movingObject = event.target;
+            });
+
+            fabricCanvas.on('mouse:up', (event) => {
+                if (movingObject) {
+                    let newPageNum = getCurrentPageNum(movingObject.left, movingObject.top);
+                    if (newPageNum !== pageNum - 1 && newPageNum >= 0) {
+                        fabricCanvas.remove(movingObject);
+                        let newFabricCanvas = fabricCanvasInstances[newPageNum];
+                        if (newFabricCanvas) {
+                            movingObject.set({
+                                left: movingObject.left,
+                                top: movingObject.top
+                            });
+                            newFabricCanvas.add(movingObject);
+                            newFabricCanvas.bringToFront(movingObject); // Ensure it remains on top
+                            let objKey = movingObject.type === 'image' ? 'image' : movingObject.type === 'rect' ? 'rect' : 'text';
+                            edits[movingObject.id] = {
+                                type: movingObject.type === 'image' ? 'move_image' : 'move_text',
+                                from_page: pageNum - 1,
+                                to_page: newPageNum,
+                                x: movingObject.left / viewport.scale,
+                                y: movingObject.top / viewport.scale,
+                                width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                content: movingObject.type === 'image' ? movingObject._element.src : movingObject.text,
+                                fontsize: objKey === 'text' ? movingObject.fontSize : null,
+                                font: objKey === 'text' ? movingObject.fontFamily : null
+                            };
+                            movingObject = null;
+                        }
+                    } else {
+                        let objKey = movingObject.type === 'image' ? 'image' : movingObject.type === 'rect' ? 'rect' : 'text';
+                        edits[movingObject.id] = {
+                            type: movingObject.type === 'image' ? 'move_image' : 'move_text',
+                            page: pageNum - 1,
+                            x: movingObject.left / viewport.scale,
+                            y: movingObject.top / viewport.scale,
+                            width: movingObject.width * movingObject.scaleX / viewport.scale,
+                            height: movingObject.height * movingObject.scaleY / viewport.scale,
+                            content: movingObject.type === 'image' ? movingObject._element.src : movingObject.text,
+                            fontsize: objKey === 'text' ? movingObject.fontSize : null,
+                            font: objKey === 'text' ? movingObject.fontFamily : null
+                        };
+                    }
+                }
+            });
+        }
+
+        function getCurrentPageNum(x, y) {
+            for (let i = 0; i < fabricCanvasInstances.length; i++) {
+                let canvas = fabricCanvasInstances[i];
+                let rect = canvas.getElement().getBoundingClientRect();
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        function addImageToCanvas(imgElement) {
+            let fabricCanvasInstance = fabricCanvasInstances[currentPage - 1];
+            if (currentTool === 'add_image') {
+                imgElement.onload = function() {
+                    imageCounter++;
+                    let imgInstance = new fabric.Image(imgElement, {
+                        left: 100,
+                        top: 100,
+                        scaleX: 0.5,
+                        scaleY: 0.5
+                    });
+                    fabricCanvasInstance.add(imgInstance);
+                    fabricCanvasInstance.bringToFront(imgInstance); // Ensure it remains on top
+                    let imageId = `image_${imageCounter}`;
+                    imgInstance.set({ id: imageId });
+                    edits[imageId] = {
+                        type: 'add_image',
+                        page: currentPage - 1,
+                        x: 100,
+                        y: 100,
+                        width: imgElement.width * 0.5,
+                        height: imgElement.height * 0.5,
+                        image_path: imgElement.src
+                    };
+                };
+                currentTool = '';
+            }
+        }
+
+        function applyFontSettings() {
+            let activeObject = fabricCanvasInstances[currentPage - 1].getActiveObject();
+            if (activeObject && activeObject.type === 'textbox') {
+                let fontFamily = document.getElementById('font-family').value;
+                let fontSize = document.getElementById('font-size').value;
+                let fontStyle = document.getElementById('font-style').value;
+                let fontColor = document.getElementById('font-color').value;
+
+                activeObject.set({
+                    fontFamily: fontFamily,
+                    fontSize: parseInt(fontSize),
+                    fontStyle: fontStyle,
+                    fill: fontColor
+                });
+
+                let textId = activeObject.id;
+                edits[textId] = {
+                    ...edits[textId],
+                    font: fontFamily,
+                    fontsize: parseInt(fontSize),
+                    fontstyle: fontStyle,
+                    color: fontColor
+                };
+
+                fabricCanvasInstances[currentPage - 1].renderAll();
+            }
+        }
+    </script>
+</body>
+</html>
