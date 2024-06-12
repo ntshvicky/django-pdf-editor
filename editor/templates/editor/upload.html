@@ -62,28 +62,22 @@
 </head>
 <body>
     <div class="fixed-top">
-        <div class="container-fluid">
-            <div class="row">
-                <div class="col-2">
-                    <h1>PDF Editor</h1>
-                </div>
-                <div class="col-10">
-                    <form id="upload-form" enctype="multipart/form-data">
-                        <input type="file" id="file-input" name="file" accept="application/pdf" class="btn btn-primary">
-                    </form>
-                    <button id="add-text-btn" class="btn btn-secondary"><i class="fas fa-font"></i> Add Text</button>
-                    <button id="edit-text-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Text</button>
-                    <button id="remove-text-btn" class="btn btn-secondary"><i class="fas fa-eraser"></i> Remove Text</button>
-                    <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
-                    <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
-                    <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
-                    <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-square"></i> Add Rectangle</button>
-                    <button id="add-circle-btn" class="btn btn-secondary"><i class="fas fa-circle"></i> Add Circle</button>
-                    <button id="add-line-btn" class="btn btn-secondary"><i class="fas fa-minus"></i> Add Line</button>
-                    <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
-                    <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
-                </div>
-            </div>
+        <div class="container">
+            <form id="upload-form" enctype="multipart/form-data">
+                <input type="file" id="file-input" name="file" accept="application/pdf" class="btn btn-primary">
+            </form>
+            <button id="add-text-btn" class="btn btn-secondary"><i class="fas fa-font"></i> Add Text</button>
+            <button id="edit-text-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Text</button>
+            <button id="remove-text-btn" class="btn btn-secondary"><i class="fas fa-eraser"></i> Remove Text</button>
+            <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
+            <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
+            <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
+            <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-square"></i> Add Rectangle</button>
+            <button id="add-circle-btn" class="btn btn-secondary"><i class="fas fa-circle"></i> Add Circle</button>
+            <button id="add-line-btn" class="btn btn-secondary"><i class="fas fa-minus"></i> Add Line</button>
+            <button id="remove-shape-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Shape</button>
+            <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
+            <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
         </div>
     </div>
 
@@ -225,6 +219,11 @@
             currentTool = 'add_line';
         });
 
+        document.getElementById('remove-shape-btn').addEventListener('click', () => {
+            currentTool = 'remove_shape';
+        });
+
+
         document.getElementById('image-input').addEventListener('change', (event) => {
             let file = event.target.files[0];
             let formData = new FormData();
@@ -332,7 +331,7 @@
                         left: event.pointer.x,
                         top: event.pointer.y,
                         fontSize: 20,
-                        fill: 'black',
+                        fill: '#000000',
                         id: textId
                     });
                     fabricCanvas.add(text);
@@ -358,7 +357,7 @@
                         text: 'Edit text',
                         fontsize: 20,
                         font: 'Arial',
-                        color: 'black'
+                        color: '#000000'
                     };
                     currentTool = ''; // Reset tool after use
                 } else if (currentTool === 'edit_text') {
@@ -376,6 +375,7 @@
                     let activeObject = fabricCanvas.getActiveObject();
                     if (activeObject && activeObject.type === 'textbox') {
                         let textId = activeObject.id;
+                        console.log("delete",textId, edits[textId]);
                         delete edits[textId];
                         fabricCanvas.remove(activeObject);
                     }
@@ -442,6 +442,18 @@
                         strokeWidth: 2 / viewport.scale
                     };
                     currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'remove_shape') {
+                    let activeObject = fabricCanvas.getActiveObject();
+                    if (activeObject && (activeObject.type === 'rect' || activeObject.type === 'circle' || activeObject.type === 'line')) {
+                        let shapeId = activeObject.id;
+                        edits[shapeId] = {
+                            type: 'remove_shape',
+                            page: currentPage - 1
+                        };
+                        fabricCanvas.remove(activeObject);
+                        console.log(shapeId, edits)
+                    }
+                    currentTool = ''; // Reset tool after use
                 } else if (currentTool === 'edit_image') {
                     let activeObject = fabricCanvas.getActiveObject();
                     if (activeObject && activeObject.type === 'image') {
@@ -471,6 +483,7 @@
                     }
                     currentTool = ''; // Reset tool after use
                 }
+                
             });
 
             let movingObject = null;
@@ -491,34 +504,123 @@
                             });
                             newFabricCanvas.add(movingObject);
                             newFabricCanvas.bringToFront(movingObject); // Ensure it remains on top
-                            let objKey = movingObject.type === 'image' ? 'image' : movingObject.type === 'rect' ? 'rect' : 'text';
+                            let shapeKey = movingObject.type;
+                            if (shapeKey === 'rect') {
+                                edits[movingObject.id] = {
+                                    type: 'move_rect',
+                                    from_page: pageNum - 1,
+                                    to_page: newPageNum,
+                                    x: movingObject.left / viewport.scale,
+                                    y: movingObject.top / viewport.scale,
+                                    width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                    height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                    color: movingObject.fill
+                                };
+                            } else if (shapeKey === 'circle') {
+                                edits[movingObject.id] = {
+                                    type: 'move_circle',
+                                    from_page: pageNum - 1,
+                                    to_page: newPageNum,
+                                    x: movingObject.left / viewport.scale,
+                                    y: movingObject.top / viewport.scale,
+                                    radius: movingObject.radius * movingObject.scaleX / viewport.scale,
+                                    color: movingObject.fill
+                                };
+                            } else if (shapeKey === 'line') {
+                                edits[movingObject.id] = {
+                                    type: 'move_line',
+                                    from_page: pageNum - 1,
+                                    to_page: newPageNum,
+                                    x1: movingObject.left / viewport.scale,
+                                    y1: movingObject.top / viewport.scale,
+                                    x2: movingObject.left + movingObject.width * movingObject.scaleX  / viewport.scale,
+                                    y2: movingObject.top / viewport.scale,
+                                    color: movingObject.stroke,
+                                    strokeWidth: movingObject.strokeWidth / viewport.scale
+                                };
+                            } else if (shapeKey === 'image') {
+                                edits[movingObject.id] = {
+                                    type: 'move_image',
+                                    from_page: pageNum - 1,
+                                    to_page: newPageNum,
+                                    x: movingObject.left / viewport.scale,
+                                    y: movingObject.top / viewport.scale,
+                                    width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                    height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                    content: movingObject._element.src
+                                };
+                            } else if (shapeKey === 'text' || shapeKey === 'textbox') {
+                                edits[movingObject.id] = {
+                                    type: 'move_text',
+                                    page: pageNum - 1,
+                                    x: movingObject.left / viewport.scale,
+                                    y: movingObject.top / viewport.scale,
+                                    width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                    height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                    content: movingObject.text,
+                                    fontsize: movingObject.fontSize,
+                                    font: movingObject.fontFamily,
+                                    color: movingObject.fill
+                                };
+                            }
+                            movingObject = null;
+                        }
+                    } else {
+                        let shapeKey = movingObject.type;
+                        if (shapeKey === 'rect') {
                             edits[movingObject.id] = {
-                                type: movingObject.type === 'image' ? 'move_image' : 'move_text',
-                                from_page: pageNum - 1,
-                                to_page: newPageNum,
+                                type: 'move_rect',
+                                page: pageNum - 1,
                                 x: movingObject.left / viewport.scale,
                                 y: movingObject.top / viewport.scale,
                                 width: movingObject.width * movingObject.scaleX / viewport.scale,
                                 height: movingObject.height * movingObject.scaleY / viewport.scale,
-                                content: movingObject.type === 'image' ? movingObject._element.src : movingObject.text,
-                                fontsize: objKey === 'text' ? movingObject.fontSize : null,
-                                font: objKey === 'text' ? movingObject.fontFamily : null
+                                color: movingObject.fill
                             };
-                            movingObject = null;
+                        } else if (shapeKey === 'circle') {
+                            edits[movingObject.id] = {
+                                type: 'move_circle',
+                                page: pageNum - 1,
+                                x: movingObject.left / viewport.scale,
+                                y: movingObject.top / viewport.scale,
+                                radius: movingObject.radius * movingObject.scaleX / viewport.scale,
+                                color: movingObject.fill
+                            };
+                        } else if (shapeKey === 'line') {
+                            edits[movingObject.id] = {
+                                type: 'move_line',
+                                page: pageNum - 1,
+                                x1: movingObject.left / viewport.scale,
+                                y1: movingObject.top / viewport.scale,
+                                x2:  movingObject.left + movingObject.width * movingObject.scaleX  / viewport.scale,
+                                y2: movingObject.top / viewport.scale,
+                                color: movingObject.stroke,
+                                strokeWidth: movingObject.strokeWidth / viewport.scale
+                            };
+                        } else if (shapeKey === 'image') {
+                            edits[movingObject.id] = {
+                                type: 'move_image',
+                                page: pageNum - 1,
+                                x: movingObject.left / viewport.scale,
+                                y: movingObject.top / viewport.scale,
+                                width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                content: movingObject._element.src
+                            };
+                        } else if (shapeKey === 'text' || shapeKey === 'textbox') {
+                            edits[movingObject.id] = {
+                                type: 'move_text',
+                                page: pageNum - 1,
+                                x: movingObject.left / viewport.scale,
+                                y: movingObject.top / viewport.scale,
+                                width: movingObject.width * movingObject.scaleX / viewport.scale,
+                                height: movingObject.height * movingObject.scaleY / viewport.scale,
+                                content: movingObject.text,
+                                fontsize: movingObject.fontSize,
+                                font: movingObject.fontFamily,
+                                color: movingObject.fill
+                            };
                         }
-                    } else {
-                        let objKey = movingObject.type === 'image' ? 'image' : movingObject.type === 'rect' ? 'rect' : 'text';
-                        edits[movingObject.id] = {
-                            type: movingObject.type === 'image' ? 'move_image' : 'move_text',
-                            page: pageNum - 1,
-                            x: movingObject.left / viewport.scale,
-                            y: movingObject.top / viewport.scale,
-                            width: movingObject.width * movingObject.scaleX / viewport.scale,
-                            height: movingObject.height * movingObject.scaleY / viewport.scale,
-                            content: movingObject.type === 'image' ? movingObject._element.src : movingObject.text,
-                            fontsize: objKey === 'text' ? movingObject.fontSize : null,
-                            font: objKey === 'text' ? movingObject.fontFamily : null
-                        };
                     }
                 }
             });

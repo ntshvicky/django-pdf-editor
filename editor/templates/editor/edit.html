@@ -77,12 +77,13 @@
                     <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
                     <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
                     <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
-                    <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-draw-polygon"></i> Add Shape</button>
+                    <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-square"></i> Add Rectangle</button>
+                    <button id="add-circle-btn" class="btn btn-secondary"><i class="fas fa-circle"></i> Add Circle</button>
+                    <button id="add-line-btn" class="btn btn-secondary"><i class="fas fa-minus"></i> Add Line</button>
                     <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
                     <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
                 </div>
             </div>
-            
         </div>
     </div>
 
@@ -151,6 +152,7 @@
         let currentPage = 1;
         let textCounter = 0; // Counter for unique text IDs
         let imageCounter = 0; // Counter for unique image IDs
+        let shapeCounter = 0; // Counter for unique shape IDs
 
         document.getElementById('file-input').addEventListener('change', (event) => {
             let file = event.target.files[0];
@@ -213,7 +215,14 @@
 
         document.getElementById('add-rect-btn').addEventListener('click', () => {
             currentTool = 'add_rect';
-            document.getElementById('color-picker').click();
+        });
+
+        document.getElementById('add-circle-btn').addEventListener('click', () => {
+            currentTool = 'add_circle';
+        });
+
+        document.getElementById('add-line-btn').addEventListener('click', () => {
+            currentTool = 'add_line';
         });
 
         document.getElementById('image-input').addEventListener('change', (event) => {
@@ -372,7 +381,8 @@
                     }
                     currentTool = ''; // Reset tool after use
                 } else if (currentTool === 'add_rect') {
-                    let rectId = `rect_${pageNum}_${event.pointer.x}_${event.pointer.y}`;
+                    shapeCounter++;
+                    let rectId = `rect_${shapeCounter}`;
                     let rect = new fabric.Rect({
                         left: event.pointer.x,
                         top: event.pointer.y,
@@ -390,6 +400,46 @@
                         width: 100 / viewport.scale,
                         height: 50 / viewport.scale,
                         color: document.getElementById('color-picker').value
+                    };
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'add_circle') {
+                    shapeCounter++;
+                    let circleId = `circle_${shapeCounter}`;
+                    let circle = new fabric.Circle({
+                        left: event.pointer.x,
+                        top: event.pointer.y,
+                        fill: document.getElementById('color-picker').value,
+                        radius: 50,
+                        id: circleId
+                    });
+                    fabricCanvas.add(circle);
+                    edits[circleId] = {
+                        type: 'add_circle',
+                        page: pageNum - 1,
+                        x: event.pointer.x / viewport.scale,
+                        y: event.pointer.y / viewport.scale,
+                        radius: 50 / viewport.scale,
+                        color: document.getElementById('color-picker').value
+                    };
+                    currentTool = ''; // Reset tool after use
+                } else if (currentTool === 'add_line') {
+                    shapeCounter++;
+                    let lineId = `line_${shapeCounter}`;
+                    let line = new fabric.Line([event.pointer.x, event.pointer.y, event.pointer.x + 100, event.pointer.y], {
+                        stroke: document.getElementById('color-picker').value,
+                        strokeWidth: 2,
+                        id: lineId
+                    });
+                    fabricCanvas.add(line);
+                    edits[lineId] = {
+                        type: 'add_line',
+                        page: pageNum - 1,
+                        x1: event.pointer.x / viewport.scale,
+                        y1: event.pointer.y / viewport.scale,
+                        x2: (event.pointer.x + 100) / viewport.scale,
+                        y2: event.pointer.y / viewport.scale,
+                        color: document.getElementById('color-picker').value,
+                        strokeWidth: 2 / viewport.scale
                     };
                     currentTool = ''; // Reset tool after use
                 } else if (currentTool === 'edit_image') {

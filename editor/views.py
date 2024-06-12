@@ -41,7 +41,7 @@ def edit_pdf(request):
         image_operations = {}
         shape_edits = {}
 
-        for edit in data['edits'].values():
+        for id, edit in data['edits'].items():
             page_number = edit['page']
             page = doc[page_number]
 
@@ -56,24 +56,26 @@ def edit_pdf(request):
 
             elif edit['type'] in ['add_image', 'move_image']:
                 image_url = edit['image_path'] if edit['type'] == 'add_image' else edit['content']
-                image_operations[image_url] = (page_number, edit['x'], edit['y'], +edit['width'], edit['height'])
+                image_operations[image_url] = (page_number, edit['x'], edit['y'], edit['x']+edit['width'], edit['y']+edit['height'])
 
-            elif edit['type'] in ['add_rect', 'add_circle', 'add_line']:
-                shape_edits[edit['id']] = edit
+            elif edit['type'] in ['add_rect', 'add_circle', 'move_rect', 'move_circle', ]:
+                shape_id = edit.get('shape_id', f"shape_{edit['x']}_{edit['y']}_{page_number}")
+                shape_edits[shape_id] = edit
+            elif edit['type'] in ['add_line', 'move_line']:
+                shape_id = edit.get('shape_id', f"shape_{edit['x1']}_{edit['y1']}_{page_number}")
+                shape_edits[shape_id] = edit
 
         # Apply the final state of text edits
         for text_id, edit in text_edits.items():
             color = (0, 0, 0) if 'color' not in edit else normalize_color(tuple(int(edit['color'][i:i+2], 16) for i in (1, 3, 5)))
-            #print(color)
             page = doc[edit['page']]
             text = edit.get('text', edit.get('content', ''))
             fontname = edit.get('font', 'Arial')
-            fontsize = edit.get('fontsize', 12)
+            fontsize = edit.get('fontsize', 12) - 2 #-2 added bcz size was not working as view
             fontstyle = edit.get('fontstyle', 'normal')
 
-            
             # Correct text position
-            text_x = edit['x']
+            text_x = edit['x'] + 10.0 #_10 added bcz x-axis was not working as view
             text_y = edit['y'] + edit['height'] if edit['type']=='move_text' else  edit['y']
             if 'move_x' in edit and 'move_y' in edit:
                 text_x += edit['move_x']
@@ -81,23 +83,26 @@ def edit_pdf(request):
 
             # Use font file if specified
             fontfile = FONT_FILES.get(fontname, 'helv')
-            print(fontfile)
             page.insert_text((text_x, text_y), text, fontsize=fontsize, fontfile=fontfile, color=color)
 
         # Apply the final state of shape edits
         for shape_id, edit in shape_edits.items():
-            color = (0, 0, 0) if 'color' not in edit else normalize_color(tuple(int(edit['color'][i:i+2], 16) for i in (1, 3, 5)))
+            if edit['type'] == 'remove_shape':
+                continue  # Skip shapes marked for removal
+
             page = doc[edit['page']]
-            if edit['type'] == 'add_rect':
+            color = (0, 0, 0) if 'color' not in edit else normalize_color(tuple(int(edit['color'][i:i+2], 16) for i in (1, 3, 5)))
+
+            if edit['type'] == 'add_rect' or edit['type'] == 'move_rect':
                 rect = fitz.Rect(edit['x'], edit['y'], edit['x'] + edit['width'], edit['y'] + edit['height'])
                 page.draw_rect(rect, color=color, fill=color)
-            elif edit['type'] == 'add_circle':
-                center = fitz.Point(edit['x'], edit['y'])
+
+            elif edit['type'] == 'add_circle' or edit['type'] == 'move_circle':
+                center = fitz.Point(edit['x']+edit['radius'], edit['y']+edit['radius'])
                 page.draw_circle(center, edit['radius'], color=color, fill=color)
-            elif edit['type'] == 'add_line':
-                point1 = fitz.Point(edit['x1'], edit['y1'])
-                point2 = fitz.Point(edit['x2'], edit['y2'])
-                page.draw_line(point1, point2, color=color, width=edit['strokeWidth'])
+
+            elif edit['type'] == 'add_line' or edit['type'] == 'move_line':
+                page.draw_line((edit['x1'], edit['y1']), (edit['x2'], edit['y2']), color=color, width=edit['strokeWidth'])
 
 
         # Apply the final operation for each image
@@ -105,13 +110,12 @@ def edit_pdf(request):
             page = doc[page_number]
             image_filename = os.path.basename(image_url)
             image_path = os.path.join(settings.MEDIA_ROOT, 'images', image_filename)
-            rect = fitz.Rect(x, y, x + width, y + height)
+            rect = fitz.Rect(x, y, width, height)
             page.insert_image(rect, filename=image_path)
 
         new_file_path = file_path.replace(".pdf", "_edited.pdf")
         doc.save(new_file_path)
         output_path = 'media' + new_file_path.replace(settings.MEDIA_ROOT, '')
-        print(output_path)
         return JsonResponse({'status': 'success', 'new_file_path': output_path})
     return JsonResponse({'status': 'failed'})
 
