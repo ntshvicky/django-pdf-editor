@@ -62,22 +62,29 @@
 </head>
 <body>
     <div class="fixed-top">
-        <div class="container">
-            <form id="upload-form" enctype="multipart/form-data">
-                <input type="file" id="file-input" name="file" accept="application/pdf" class="btn btn-primary">
-            </form>
-            <button id="add-text-btn" class="btn btn-secondary"><i class="fas fa-font"></i> Add Text</button>
-            <button id="edit-text-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Text</button>
-            <button id="remove-text-btn" class="btn btn-secondary"><i class="fas fa-eraser"></i> Remove Text</button>
-            <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
-            <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
-            <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
-            <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-square"></i> Add Rectangle</button>
-            <button id="add-circle-btn" class="btn btn-secondary"><i class="fas fa-circle"></i> Add Circle</button>
-            <button id="add-line-btn" class="btn btn-secondary"><i class="fas fa-minus"></i> Add Line</button>
-            <button id="remove-shape-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Shape</button>
-            <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
-            <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-2">
+                    <h1>PDF Editor</h1>
+                </div>
+                <div class="col-10">
+                    <form id="upload-form" enctype="multipart/form-data">
+                        <input type="file" id="file-input" name="file" accept="application/pdf" class="btn btn-primary">
+                    </form>
+                    <button id="add-text-btn" class="btn btn-secondary"><i class="fas fa-font"></i> Add Text</button>
+                    <button id="edit-text-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Text</button>
+                    <button id="remove-text-btn" class="btn btn-secondary"><i class="fas fa-eraser"></i> Remove Text</button>
+                    <button id="add-image-btn" class="btn btn-secondary"><i class="fas fa-image"></i> Add Image</button>
+                    <button id="edit-image-btn" class="btn btn-secondary"><i class="fas fa-edit"></i> Edit Image</button>
+                    <button id="remove-image-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Image</button>
+                    <button id="add-rect-btn" class="btn btn-secondary"><i class="fas fa-square"></i> Add Rectangle</button>
+                    <button id="add-circle-btn" class="btn btn-secondary"><i class="fas fa-circle"></i> Add Circle</button>
+                    <button id="add-line-btn" class="btn btn-secondary"><i class="fas fa-minus"></i> Add Line</button>
+                    <button id="remove-shape-btn" class="btn btn-secondary"><i class="fas fa-trash"></i> Remove Shape</button>
+                    <input type="color" id="color-picker" value="#FF0000" class="btn btn-secondary">
+                    <button id="save-btn" class="btn btn-success"><i class="fas fa-save"></i> Save PDF</button>
+                </div>
+            </div>
         </div>
     </div>
 
