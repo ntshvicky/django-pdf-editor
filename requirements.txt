@@ -1,0 +1,5 @@
+whitenoise
+django 
+pymupdf 
+pillow 
+reportlab
