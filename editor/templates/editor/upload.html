@@ -635,10 +635,14 @@
 
         function getCurrentPageNum(x, y) {
             for (let i = 0; i < fabricCanvasInstances.length; i++) {
+                console.log(fabricCanvasInstances)
                 let canvas = fabricCanvasInstances[i];
-                let rect = canvas.getElement().getBoundingClientRect();
-                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-                    return i;
+                if(canvas !== undefined){
+
+                    let rect = canvas.getElement().getBoundingClientRect();
+                    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                        return i;
+                    }
                 }
             }
             return -1;
