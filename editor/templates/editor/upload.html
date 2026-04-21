@@ -781,6 +781,7 @@ let pageOps = [];
 
 const getN = (v, d) => (typeof v === 'number' && !isNaN(v)) ? v : d;
 const shouldPreserveEditType = type => !!type && (type.startsWith('add_') || type.startsWith('replace_') || type.startsWith('remove_'));
+const getCanvasScale = fc => (fc && fc.pdfScale) || 1;
 
 // ===== DOM REFS =====
 const pdfArea = document.getElementById('pdf-area');
@@ -1132,7 +1133,7 @@ deletePageBtn.addEventListener('click', () => queuePageOperation('delete_page'))
 
 // ===== CANVAS SETUP =====
 function setupCanvas(fc, pageNum, vp, scale) {
-  fc.viewportTransform = [scale, 0, 0, scale, 0, 0];
+  fc.pdfScale = scale;
   const idx = pageNum - 1;
 
   fc.on('mouse:down', e => {
@@ -1145,8 +1146,8 @@ function setupCanvas(fc, pageNum, vp, scale) {
       textCounter++;
       const id = `text_${textCounter}_p${pageNum}`;
       const t = new fabric.Textbox('Type here…', {
-        left: ptr.x, top: ptr.y, fontSize: 20, fill: fill,
-        fontFamily: 'Arial', id, width: 200, editable: true, opacity
+        left: ptr.x, top: ptr.y, fontSize: 20 * scale, fill: fill,
+        fontFamily: 'Arial', id, width: 200 * scale, editable: true, opacity
       });
       fc.add(t); fc.setActiveObject(t); t.enterEditing();
       edits[id] = { type: 'add_text', page: idx, x: ptr.x / scale, y: ptr.y / scale,
@@ -1168,8 +1169,8 @@ function setupCanvas(fc, pageNum, vp, scale) {
       textCounter++;
       const id = `note_${textCounter}_p${pageNum}`;
       const t = new fabric.Textbox('📝 Sticky note…', {
-        left: ptr.x, top: ptr.y, fontSize: 13, fill: '#1e293b',
-        fontFamily: 'Inter', id, width: 160, editable: true, opacity: 1,
+        left: ptr.x, top: ptr.y, fontSize: 13 * scale, fill: '#1e293b',
+        fontFamily: 'Inter', id, width: 160 * scale, editable: true, opacity: 1,
         backgroundColor: '#FEF08A', padding: 8
       });
       fc.add(t); fc.setActiveObject(t); t.enterEditing();
@@ -1284,7 +1285,7 @@ function syncEdit(obj, idx, scale) {
 
   if (obj.type === 'textbox') {
     edits[id] = { ...cur, type, page: idx, x, y, text: obj.text || '',
-      fontsize: getN(obj.fontSize, 12), font: obj.fontFamily || 'Arial',
+      fontsize: getN(obj.fontSize / scale, 12), font: obj.fontFamily || 'Arial',
       color: obj.fill || '#000000', fontstyle: (obj.fontStyle === 'italic' ? 'italic ' : '') + (obj.fontWeight === 'bold' ? 'bold' : 'normal'),
       width: w, height: h, opacity: obj.opacity };
   } else if (obj.type === 'rect' || obj.type === 'triangle') {
@@ -1317,7 +1318,7 @@ function applyEdits(fc, idx, scale) {
 
     if (e.type.includes('text') || e.type.includes('note')) {
       const t = new fabric.Textbox(e.text || '', {
-        left: e.x * scale, top: e.y * scale, fontSize: e.fontsize,
+        left: e.x * scale, top: e.y * scale, fontSize: e.fontsize * scale,
         fill: e.color, fontFamily: e.font || 'Arial',
         fontStyle: (e.fontstyle || '').includes('italic') ? 'italic' : 'normal',
         fontWeight: (e.fontstyle || '').includes('bold') ? 'bold' : 'normal',
@@ -1356,7 +1357,7 @@ function applyEdits(fc, idx, scale) {
       });
     } else if (e.type.includes('replace_text')) {
       const t = new fabric.Textbox(e.text || '', {
-        left: e.orig_x * scale, top: e.orig_y * scale, fontSize: e.fontsize || 12,
+        left: e.orig_x * scale, top: e.orig_y * scale, fontSize: (e.fontsize || 12) * scale,
         fill: e.color || '#000000', fontFamily: e.font || 'Arial', id, editable: true,
         backgroundColor: 'rgba(255,255,200,0.6)' });
       fc.add(t);
@@ -1401,7 +1402,7 @@ function loadExistingContent(pageNum) {
   const fc = fabricCanvasInstances[pageNum - 1];
   if (!fc || !filePath) return;
   hideExistingContent(fc);
-  const scale = fc.viewportTransform[0];
+  const scale = getCanvasScale(fc);
   fetch('/extract_content/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
@@ -1503,7 +1504,7 @@ function replaceExistingImageOnCanvas(existingObj, src) {
   const fc = getActiveCanvas();
   if (!fc || !existingObj) return;
   const item = existingObj.pdfContent;
-  const scale = fc.viewportTransform[0];
+  const scale = getCanvasScale(fc);
   const id = `replace_${item.id}`;
   fabric.Image.fromURL(src, img => {
     if (!img) return;
@@ -1537,7 +1538,7 @@ function addImageToCanvas(src) {
     if (!img) return;
     imageCounter++;
     const id = `img_${imageCounter}_p${currentPage}`;
-    const scale = fc.viewportTransform[0];
+    const scale = getCanvasScale(fc);
     const iw = Math.min(200 * scale, img.width);
     const ih = (img.height / img.width) * iw;
     img.set({ left: 80, top: 80, scaleX: iw / img.width, scaleY: ih / img.height, id });
@@ -1568,7 +1569,7 @@ function showProps(obj) {
   if (!obj) { hideProps(); return; }
   hideProps(); noSel.style.display = 'none';
   const fc = fabricCanvasInstances[currentPage - 1];
-  const scale = fc ? fc.viewportTransform[0] : 1;
+  const scale = fc ? getCanvasScale(fc) : 1;
 
   // auto-switch to Properties tab
   document.querySelectorAll('.sr-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'props'));
@@ -1585,7 +1586,7 @@ function showProps(obj) {
   } else if (obj.type === 'textbox') {
     textPropsEl.style.display = 'block';
     document.getElementById('font-family').value = obj.fontFamily || 'Arial';
-    document.getElementById('font-size').value = obj.fontSize || 20;
+    document.getElementById('font-size').value = Math.round((obj.fontSize || 20) / scale);
     document.getElementById('btn-bold').classList.toggle('on', obj.fontWeight === 'bold');
     document.getElementById('btn-italic').classList.toggle('on', obj.fontStyle === 'italic');
     document.getElementById('btn-underline').classList.toggle('on', !!obj.underline);
@@ -1681,7 +1682,7 @@ document.getElementById('apply-text-btn').addEventListener('click', () => {
   if (!o || o.type !== 'textbox') return;
   o.set({
     fontFamily: fontFamily.value,
-    fontSize: parseInt(fontSize.value) || 20,
+    fontSize: (parseInt(fontSize.value) || 20) * getCanvasScale(fc),
     fontWeight: document.getElementById('btn-bold').classList.contains('on') ? 'bold' : 'normal',
     fontStyle: document.getElementById('btn-italic').classList.contains('on') ? 'italic' : 'normal',
     underline: document.getElementById('btn-underline').classList.contains('on'),
@@ -1716,7 +1717,7 @@ document.getElementById('apply-shape-btn').addEventListener('click', () => {
 document.getElementById('apply-image-btn').addEventListener('click', () => {
   const o = getActiveObj(); const fc = getActiveCanvas();
   if (!o || o.type !== 'image') return;
-  const scale = fc.viewportTransform[0];
+  const scale = getCanvasScale(fc);
   const w = parseInt(document.getElementById('img-w').value);
   const h = parseInt(document.getElementById('img-h').value);
   if (!w || !h) return;
@@ -1790,12 +1791,12 @@ document.getElementById('modal-confirm').addEventListener('click', () => {
   if (!newText) { toast('Please enter replacement text', 'info'); return; }
   const id = selectedSpan.id + '_replace';
   const fc = fabricCanvasInstances[currentPage - 1];
-  const scale = fc ? fc.viewportTransform[0] : baseScale;
+  const scale = fc ? getCanvasScale(fc) : baseScale;
 
   // Add visual replacement textbox on canvas
   const t = new fabric.Textbox(newText, {
     left: selectedSpan.x * scale, top: selectedSpan.y * scale,
-    fontSize: selectedSpan.fontsize, fill: selectedSpan.color || '#000000',
+    fontSize: selectedSpan.fontsize * scale, fill: selectedSpan.color || '#000000',
     fontFamily: 'Arial', id, editable: true, backgroundColor: 'rgba(255,255,200,0.7)',
     width: selectedSpan.width * scale + 20
   });
@@ -1858,7 +1859,7 @@ saveBtn.addEventListener('click', () => {
   const allEdits = {};
   fabricCanvasInstances.forEach((fc, idx) => {
     if (!fc) return;
-    const scale = fc.viewportTransform[0];
+    const scale = getCanvasScale(fc);
     fc.forEachObject(obj => {
       const id = obj.id; if (!id) return;
       const cur = edits[id] || {};
@@ -1868,7 +1869,7 @@ saveBtn.addEventListener('click', () => {
 
       if (obj.type === 'textbox') {
         allEdits[id] = { ...cur, type, page: idx, x, y, text: obj.text || '',
-          fontsize: getN(obj.fontSize, 12), font: obj.fontFamily || 'Arial',
+          fontsize: getN(obj.fontSize / scale, 12), font: obj.fontFamily || 'Arial',
           color: obj.fill || '#000000', fontstyle: (obj.fontStyle === 'italic' ? 'italic ' : '') + (obj.fontWeight === 'bold' ? 'bold' : 'normal'),
           width: w, height: h, opacity: obj.opacity || 1 };
       } else if (obj.type === 'rect' || obj.type === 'triangle') {
