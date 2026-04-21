@@ -2,6 +2,8 @@
 
 A premium, responsive web application for editing PDFs and chatting with your documents using AI. Built with Django, PyMuPDF, and Google's Gemini AI, featuring a modern glassmorphism user interface.
 
+![PDFGenius editor interface](Screenshot1.png)
+
 ## Features
 
 - **Modern Glassmorphism UI**: A beautiful, responsive interface that works flawlessly on desktop and mobile.
