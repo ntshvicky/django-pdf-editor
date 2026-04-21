@@ -9,6 +9,8 @@ A premium, responsive web application for editing PDFs and chatting with your do
 - **Modern Glassmorphism UI**: A beautiful, responsive interface that works flawlessly on desktop and mobile.
 - **AI PDF Chat**: Ask questions about your PDF and get intelligent answers powered by Google's Gemini AI.
 - **PDF Editing**:
+  - Select and edit existing PDF text spans.
+  - Delete or replace images already embedded in the PDF.
   - Add text with customizable fonts, sizes, and colors.
   - Draw shapes (rectangles, circles, lines) with various styles.
   - Insert images into your PDFs.

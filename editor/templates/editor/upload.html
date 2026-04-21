@@ -195,6 +195,12 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--txt
   min-height: 200px; text-align: center; padding: 20px; color: var(--txt2); }
 .no-sel i { font-size: 2rem; margin-bottom: 12px; opacity: .4; }
 .no-sel p { font-size: .82rem; }
+.existing-props-info { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surf2); color: var(--txt); font-size: .82rem; line-height: 1.45; margin-bottom: 12px; }
+.btn-danger-soft { width: 100%; padding: 9px; border: 1px solid rgba(239,68,68,.25);
+  border-radius: 10px; font-size: .82rem; font-weight: 600; cursor: pointer;
+  background: rgba(239,68,68,.08); color: var(--danger); transition: all .15s; margin-top: 8px; }
+.btn-danger-soft:hover { background: rgba(239,68,68,.14); }
 .prop-section { margin-bottom: 20px; }
 .prop-title { font-size: .68rem; font-weight: 700; color: var(--txt2); text-transform: uppercase;
   letter-spacing: .07em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
@@ -434,6 +440,7 @@ select.inp { cursor: pointer; }
   <button class="btn-tool" data-tool="highlight" title="Highlight"><i class="fas fa-highlighter"></i><span class="tooltip-label">Highlight (H)</span></button>
   <button class="btn-tool" data-tool="sticky_note" title="Sticky Note"><i class="fas fa-sticky-note"></i><span class="tooltip-label">Sticky Note (N)</span></button>
   <button class="btn-tool" data-tool="edit_pdf_text" title="Edit Existing PDF Text" id="edit-pdf-text-btn"><i class="fas fa-pen-to-square"></i><span class="tooltip-label">Edit PDF Text (E)</span></button>
+  <button class="btn-tool" data-tool="edit_existing" title="Select Existing PDF Content"><i class="fas fa-object-ungroup"></i><span class="tooltip-label">Edit Existing</span></button>
   <div class="tbar-sep"></div>
   <button class="btn-tool" data-tool="add_rect" title="Rectangle"><i class="fas fa-square"></i><span class="tooltip-label">Rectangle (R)</span></button>
   <button class="btn-tool" data-tool="add_circle" title="Circle"><i class="fas fa-circle"></i><span class="tooltip-label">Circle (C)</span></button>
@@ -515,6 +522,15 @@ select.inp { cursor: pointer; }
         <div class="no-sel" id="no-sel">
           <i class="fas fa-hand-pointer"></i>
           <p>Select an object on the canvas to edit its properties</p>
+        </div>
+
+        <div id="existing-props" style="display:none">
+          <div class="prop-section">
+            <div class="prop-title">Existing PDF Content</div>
+            <div class="existing-props-info" id="existing-info">Selected PDF content</div>
+            <button class="btn-apply" id="replace-existing-btn">Replace</button>
+            <button class="btn-danger-soft" id="delete-existing-btn">Delete From PDF</button>
+          </div>
         </div>
 
         <!-- Text properties -->
@@ -744,8 +760,11 @@ let textCounter = 0, imageCounter = 0, shapeCounter = 0;
 let historyStacks = {}; // pageIdx -> {undo:[], redo:[]}
 let clipboard = null;
 let selectedSpan = null; // for edit PDF text modal
+let contentEditMode = false;
+let pendingExistingImage = null;
 
 const getN = (v, d) => (typeof v === 'number' && !isNaN(v)) ? v : d;
+const shouldPreserveEditType = type => !!type && (type.startsWith('add_') || type.startsWith('replace_') || type.startsWith('remove_'));
 
 // ===== DOM REFS =====
 const pdfArea = document.getElementById('pdf-area');
@@ -827,6 +846,7 @@ document.querySelectorAll('.sr-tab').forEach(t => {
 const toolBtns = document.querySelectorAll('.btn-tool[data-tool]');
 function activateTool(name) {
   currentTool = name;
+  contentEditMode = name === 'edit_existing';
   toolBtns.forEach(b => b.classList.toggle('active', b.dataset.tool === name));
   const current = fabricCanvasInstances[currentPage - 1];
   if (!current) return;
@@ -839,6 +859,13 @@ function activateTool(name) {
   }
   current.selection = (name === 'select');
   current.defaultCursor = name === 'select' ? 'default' : 'crosshair';
+  if (name === 'edit_existing') {
+    current.selection = true;
+    current.defaultCursor = 'default';
+    loadExistingContent(currentPage);
+  } else {
+    hideExistingContent(current);
+  }
 }
 toolBtns.forEach(b => b.addEventListener('click', () => {
   if (b.dataset.tool === 'add_image') { activateTool('add_image'); imageInput.click(); return; }
@@ -888,6 +915,7 @@ document.getElementById('file-input').addEventListener('change', e => {
       statusFile.textContent = d.file_name || f.name;
       edits = {}; fabricCanvasInstances = []; historyStacks = {};
       textCounter = 0; imageCounter = 0; shapeCounter = 0; currentPage = 1;
+      contentEditMode = false; pendingExistingImage = null;
       updateStatus();
       loadPDF(filePath);
       chatMsgs.innerHTML = `<div class="msg system">PDF uploaded! Ask me anything about it.</div>
@@ -982,6 +1010,7 @@ function renderPage(n) {
       }
       setupCanvas(fc, n, vp, scale);
       applyEdits(fc, n - 1, scale);
+      if (contentEditMode) loadExistingContent(n);
       if (!historyStacks[n - 1]) historyStacks[n - 1] = { undo: [], redo: [] };
       saveHistory(n - 1);
       updateStatus();
@@ -1191,7 +1220,7 @@ function setupCanvas(fc, pageNum, vp, scale) {
 function syncEdit(obj, idx, scale) {
   const id = obj.id; if (!id) return;
   const cur = edits[id] || {};
-  const type = cur.type && cur.type.startsWith('add_') ? cur.type : 'edit_' + obj.type;
+  const type = shouldPreserveEditType(cur.type) ? cur.type : 'edit_' + obj.type;
   const x = getN(obj.left / scale, 0), y = getN(obj.top / scale, 0);
   const w = getN(obj.getScaledWidth() / scale, 50), h = getN(obj.getScaledHeight() / scale, 50);
 
@@ -1278,6 +1307,107 @@ function applyEdits(fc, idx, scale) {
   fc.renderAll();
 }
 
+function hideExistingContent(fc) {
+  if (!fc) return;
+  fc.getObjects()
+    .filter(o => o.objType === 'existing_text' || o.objType === 'existing_image')
+    .forEach(o => fc.remove(o));
+  fc.renderAll();
+}
+
+function addExistingOverlay(fc, item, scale) {
+  const isText = item.kind === 'text';
+  const id = `${item.id}_overlay`;
+  if (fc.getObjects().find(o => o.id === id)) return;
+  const rect = new fabric.Rect({
+    left: item.x * scale,
+    top: item.y * scale,
+    width: Math.max(item.width * scale, 8),
+    height: Math.max(item.height * scale, 8),
+    fill: isText ? 'rgba(99,102,241,0.08)' : 'rgba(16,185,129,0.08)',
+    stroke: isText ? '#6366f1' : '#10b981',
+    strokeDashArray: [5, 4],
+    strokeWidth: 1,
+    id,
+    objType: isText ? 'existing_text' : 'existing_image',
+    pdfContent: item,
+    selectable: true,
+    hasRotatingPoint: false,
+    cornerStyle: 'circle',
+  });
+  rect.on('mousedblclick', () => replaceExistingContent(rect));
+  fc.add(rect);
+}
+
+function loadExistingContent(pageNum) {
+  const fc = fabricCanvasInstances[pageNum - 1];
+  if (!fc || !filePath) return;
+  hideExistingContent(fc);
+  const scale = fc.viewportTransform[0];
+  fetch('/extract_content/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+    body: JSON.stringify({ file_path: filePath, page: pageNum - 1 })
+  }).then(r => r.json()).then(d => {
+    if (d.status !== 'success') {
+      toast('Could not scan existing PDF content', 'error');
+      return;
+    }
+    [...d.texts, ...d.images].forEach(item => addExistingOverlay(fc, item, scale));
+    fc.renderAll();
+    toast(`Found ${d.texts.length} text items and ${d.images.length} images on this page`, 'info');
+  }).catch(() => toast('Could not scan existing PDF content', 'error'));
+}
+
+function existingEditFromObject(obj, type, extra = {}) {
+  const item = obj.pdfContent || {};
+  return {
+    type,
+    page: currentPage - 1,
+    orig_x: item.x,
+    orig_y: item.y,
+    orig_x2: item.x2,
+    orig_y2: item.y2,
+    x: item.x,
+    y: item.y,
+    width: item.width,
+    height: item.height,
+    ...extra,
+  };
+}
+
+function previewExistingRemoval(obj) {
+  const fc = getActiveCanvas();
+  if (!fc || !obj) return;
+  obj.set({ fill: 'rgba(255,255,255,0.86)', stroke: '#ef4444', strokeDashArray: [2, 2], selectable: false, evented: false });
+  fc.discardActiveObject();
+  fc.renderAll();
+}
+
+function deleteExistingContent(obj = getActiveObj()) {
+  if (!obj || !obj.pdfContent) return;
+  const type = obj.objType === 'existing_image' ? 'remove_pdf_image' : 'remove_pdf_text';
+  edits[`remove_${obj.pdfContent.id}`] = existingEditFromObject(obj, type);
+  previewExistingRemoval(obj);
+  hideProps();
+  saveHistory(currentPage - 1);
+  toast('Existing PDF content will be deleted on export.', 'success');
+}
+
+function replaceExistingContent(obj = getActiveObj()) {
+  if (!obj || !obj.pdfContent) return;
+  if (obj.objType === 'existing_image') {
+    pendingExistingImage = obj;
+    imageInput.click();
+    return;
+  }
+  selectedSpan = obj.pdfContent;
+  document.getElementById('modal-body').innerHTML = `<p style="font-size:.78rem;color:var(--txt2);margin-bottom:10px">Replace the selected existing PDF text.</p><div class="edit-field-wrap show"><div class="edit-field-lbl">New text:</div><textarea class="edit-area" id="edit-area" rows="3"></textarea></div>`;
+  document.getElementById('edit-area').value = selectedSpan.text || '';
+  document.getElementById('modal-confirm').disabled = false;
+  document.getElementById('edit-text-modal').classList.add('open');
+}
+
 // ===== IMAGE UPLOAD =====
 const imageInput = document.getElementById('image-input');
 imageInput.addEventListener('change', e => {
@@ -1299,10 +1429,48 @@ imageInput.addEventListener('change', e => {
       if (!r.ok) throw new Error(d.error || 'Image upload failed');
       return d;
     })
-    .then(d => addImageToCanvas(d.image_path))
+    .then(d => {
+      if (pendingExistingImage) {
+        replaceExistingImageOnCanvas(pendingExistingImage, d.image_path);
+        pendingExistingImage = null;
+      } else {
+        addImageToCanvas(d.image_path);
+      }
+    })
     .catch(err => toast(err.message || 'Image upload failed', 'error'));
   e.target.value = '';
 });
+
+function replaceExistingImageOnCanvas(existingObj, src) {
+  const fc = getActiveCanvas();
+  if (!fc || !existingObj) return;
+  const item = existingObj.pdfContent;
+  const scale = fc.viewportTransform[0];
+  const id = `replace_${item.id}`;
+  fabric.Image.fromURL(src, img => {
+    if (!img) return;
+    img.set({
+      left: item.x * scale,
+      top: item.y * scale,
+      scaleX: (item.width * scale) / img.width,
+      scaleY: (item.height * scale) / img.height,
+      id,
+    });
+    edits[id] = existingEditFromObject(existingObj, 'replace_pdf_image', {
+      image_path: src,
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+    });
+    fc.remove(existingObj);
+    fc.add(img);
+    fc.setActiveObject(img);
+    fc.renderAll();
+    saveHistory(currentPage - 1);
+    toast('Existing PDF image will be replaced on export.', 'success');
+  });
+}
 
 function addImageToCanvas(src) {
   const fc = fabricCanvasInstances[currentPage - 1];
@@ -1328,12 +1496,15 @@ const noSel = document.getElementById('no-sel');
 const textPropsEl = document.getElementById('text-props');
 const shapePropsEl = document.getElementById('shape-props');
 const imagePropsEl = document.getElementById('image-props');
+const existingPropsEl = document.getElementById('existing-props');
+const existingInfoEl = document.getElementById('existing-info');
 
 function hideProps() {
   noSel.style.display = 'flex';
   textPropsEl.style.display = 'none';
   shapePropsEl.style.display = 'none';
   imagePropsEl.style.display = 'none';
+  existingPropsEl.style.display = 'none';
 }
 function showProps(obj) {
   if (!obj) { hideProps(); return; }
@@ -1345,7 +1516,15 @@ function showProps(obj) {
   document.querySelectorAll('.sr-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'props'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-props'));
 
-  if (obj.type === 'textbox') {
+  if (obj.objType === 'existing_text' || obj.objType === 'existing_image') {
+    existingPropsEl.style.display = 'block';
+    const item = obj.pdfContent || {};
+    const label = obj.objType === 'existing_image'
+      ? `Image from the original PDF (${Math.round(item.width || 0)} x ${Math.round(item.height || 0)} px).`
+      : `Text from the original PDF: "${(item.text || '').slice(0, 90)}${(item.text || '').length > 90 ? '...' : ''}"`;
+    existingInfoEl.textContent = label;
+    document.getElementById('replace-existing-btn').textContent = obj.objType === 'existing_image' ? 'Replace Image' : 'Replace Text';
+  } else if (obj.type === 'textbox') {
     textPropsEl.style.display = 'block';
     document.getElementById('font-family').value = obj.fontFamily || 'Arial';
     document.getElementById('font-size').value = obj.fontSize || 20;
@@ -1489,6 +1668,9 @@ document.getElementById('apply-image-btn').addEventListener('click', () => {
   fc.renderAll(); saveHistory(currentPage - 1); toast('Image updated!', 'success');
 });
 
+document.getElementById('replace-existing-btn').addEventListener('click', () => replaceExistingContent());
+document.getElementById('delete-existing-btn').addEventListener('click', () => deleteExistingContent());
+
 function getActiveCanvas() { return fabricCanvasInstances[currentPage - 1]; }
 function getActiveObj() { return getActiveCanvas()?.getActiveObject(); }
 
@@ -1565,6 +1747,8 @@ document.getElementById('modal-confirm').addEventListener('click', () => {
     orig_x: selectedSpan.x, orig_y: selectedSpan.y, orig_x2: selectedSpan.x2, orig_y2: selectedSpan.y2,
     fontsize: selectedSpan.fontsize, color: selectedSpan.color || '#000000', font: 'Helvetica' };
 
+  const existingOverlay = fc?.getObjects().find(o => o.pdfContent && o.pdfContent.id === selectedSpan.id);
+  if (existingOverlay) previewExistingRemoval(existingOverlay);
   saveHistory(currentPage - 1);
   document.getElementById('edit-text-modal').classList.remove('open');
   toast('Text replacement queued. Export PDF to apply.', 'success');
@@ -1620,7 +1804,7 @@ saveBtn.addEventListener('click', () => {
     fc.forEachObject(obj => {
       const id = obj.id; if (!id) return;
       const cur = edits[id] || {};
-      const type = cur.type && cur.type.startsWith('add') ? cur.type : 'edit_' + obj.type;
+      const type = shouldPreserveEditType(cur.type) ? cur.type : 'edit_' + obj.type;
       const x = getN(obj.left / scale, 0), y = getN(obj.top / scale, 0);
       const w = getN(obj.getScaledWidth() / scale, 50), h = getN(obj.getScaledHeight() / scale, 50);
 
@@ -1653,9 +1837,9 @@ saveBtn.addEventListener('click', () => {
     });
   });
 
-  // include replace_text and remove edits
+  // include PDF-native replacement and removal edits
   for (const id in edits) {
-    if (edits[id].type && (edits[id].type.startsWith('remove_') || edits[id].type === 'replace_text') && !allEdits[id]) {
+    if (edits[id].type && (edits[id].type.startsWith('remove_') || edits[id].type.startsWith('replace_')) && !allEdits[id]) {
       allEdits[id] = edits[id];
     }
   }
@@ -1731,6 +1915,10 @@ document.addEventListener('keydown', e => {
     if (!fc || !obj) return;
     if (obj.type === 'textbox' && obj.isEditing) return;
     e.preventDefault();
+    if (obj.objType === 'existing_text' || obj.objType === 'existing_image') {
+      deleteExistingContent(obj);
+      return;
+    }
     if (obj.id) {
       const t = obj.type === 'textbox' ? 'remove_text' : obj.type === 'image' ? 'remove_image' : 'remove_shape';
       edits[obj.id] = { type: t, page: currentPage - 1, id: obj.id };

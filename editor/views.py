@@ -115,6 +115,25 @@ def insert_text_on_page(page, x, y, text, fontsize, fontname, color):
             print(f"Fallback also failed: {e2}")
 
 
+def rect_from_edit(edit):
+    x = float(edit.get('orig_x', edit.get('x', 0.0)))
+    y = float(edit.get('orig_y', edit.get('y', 0.0)))
+    x2 = float(edit.get('orig_x2', edit.get('x2', x + float(edit.get('width', 0.0)))))
+    y2 = float(edit.get('orig_y2', edit.get('y2', y + float(edit.get('height', 0.0)))))
+    if x2 <= x:
+        x2 = x + float(edit.get('width', 1.0))
+    if y2 <= y:
+        y2 = y + float(edit.get('height', 1.0))
+    return fitz.Rect(x - 1, y - 1, x2 + 1, y2 + 1)
+
+
+def apply_redactions(page):
+    try:
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+    except (AttributeError, TypeError):
+        page.apply_redactions()
+
+
 @csrf_exempt
 def edit_pdf(request):
     if request.method == 'POST':
@@ -133,6 +152,20 @@ def edit_pdf(request):
                 elif edit_type.startswith('remove_'):
                     final_object_states[obj_id] = edit
 
+            for edit in final_object_states.values():
+                edit_type = edit.get('type', '')
+                page_number = edit.get('page')
+                if page_number is None or not (0 <= page_number < doc.page_count):
+                    continue
+                if edit_type in {'replace_text', 'remove_pdf_text', 'remove_pdf_image', 'replace_pdf_image'}:
+                    page = doc[page_number]
+                    page.add_redact_annot(rect_from_edit(edit), fill=(1, 1, 1))
+
+            for page in doc:
+                redactions = list(page.annots(types=(fitz.PDF_ANNOT_REDACT,)) or [])
+                if redactions:
+                    apply_redactions(page)
+
             for obj_id, edit in final_object_states.items():
                 edit_type = edit.get('type')
                 page_number = edit.get('page')
@@ -141,6 +174,9 @@ def edit_pdf(request):
                     continue
 
                 page = doc[page_number]
+
+                if edit_type in {'remove_pdf_text', 'remove_pdf_image'}:
+                    continue
 
                 if edit_type.startswith('remove_'):
                     continue
@@ -156,11 +192,6 @@ def edit_pdf(request):
                     orig_x2 = float(edit.get('orig_x2', orig_x + 100))
                     orig_y2 = float(edit.get('orig_y2', orig_y + 20))
 
-                    # Whiteout the original text
-                    cover = fitz.Rect(orig_x - 1, orig_y - 1, orig_x2 + 1, orig_y2 + 1)
-                    page.draw_rect(cover, color=(1, 1, 1), fill=(1, 1, 1), width=0)
-
-                    # Insert new text at baseline position
                     baseline = orig_y2 - fontsize * 0.15
                     insert_text_on_page(page, orig_x, baseline, new_text, fontsize, fontname, color)
 
@@ -389,6 +420,91 @@ def extract_text_blocks(request):
 
         except Exception as e:
             print(f"Error in extract_text_blocks: {e}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'status': 'failed', 'error': str(e)}, status=500)
+
+    return JsonResponse({'status': 'failed', 'error': 'Invalid request method'}, status=400)
+
+
+@csrf_exempt
+def extract_pdf_content(request):
+    """Extract selectable text spans and image boxes from a PDF page."""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            file_path = data.get('file_path')
+            page_number = int(data.get('page', 0))
+
+            full_file_path = media_path_from_url(file_path)
+            if not os.path.exists(full_file_path):
+                return JsonResponse({'status': 'failed', 'error': 'File not found'}, status=404)
+
+            doc = fitz.open(full_file_path)
+            if page_number < 0 or page_number >= doc.page_count:
+                return JsonResponse({'status': 'failed', 'error': 'Invalid page'}, status=400)
+
+            page = doc[page_number]
+            text_spans = []
+            image_boxes = []
+            idx = 0
+
+            for block in page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span.get('text', '')
+                        if not text.strip():
+                            continue
+                        bbox = span['bbox']
+                        color_int = span.get('color', 0)
+                        r = (color_int >> 16) & 0xFF
+                        g = (color_int >> 8) & 0xFF
+                        b = color_int & 0xFF
+                        text_spans.append({
+                            'id': f'pdf_text_{page_number}_{idx}',
+                            'kind': 'text',
+                            'text': text,
+                            'x': round(bbox[0], 2),
+                            'y': round(bbox[1], 2),
+                            'x2': round(bbox[2], 2),
+                            'y2': round(bbox[3], 2),
+                            'width': round(bbox[2] - bbox[0], 2),
+                            'height': round(bbox[3] - bbox[1], 2),
+                            'fontsize': round(span.get('size', 12), 1),
+                            'font': span.get('font', 'Helvetica'),
+                            'color': f'#{r:02x}{g:02x}{b:02x}',
+                        })
+                        idx += 1
+
+            for idx, info in enumerate(page.get_image_info(xrefs=True)):
+                bbox = info.get('bbox')
+                if not bbox:
+                    continue
+                x, y, x2, y2 = bbox
+                if x2 <= x or y2 <= y:
+                    continue
+                image_boxes.append({
+                    'id': f'pdf_image_{page_number}_{idx}',
+                    'kind': 'image',
+                    'xref': info.get('xref'),
+                    'x': round(x, 2),
+                    'y': round(y, 2),
+                    'x2': round(x2, 2),
+                    'y2': round(y2, 2),
+                    'width': round(x2 - x, 2),
+                    'height': round(y2 - y, 2),
+                })
+
+            return JsonResponse({
+                'status': 'success',
+                'texts': text_spans,
+                'images': image_boxes,
+            })
+
+        except Exception as e:
+            print(f"Error in extract_pdf_content: {e}")
             import traceback
             traceback.print_exc()
             return JsonResponse({'status': 'failed', 'error': str(e)}, status=500)
