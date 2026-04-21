@@ -1,0 +1,7 @@
+whitenoise
+django 
+pymupdf 
+pillow 
+reportlab
+google-genai
+python-dotenv
