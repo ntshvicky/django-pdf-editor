@@ -134,6 +134,35 @@ def apply_redactions(page):
         page.apply_redactions()
 
 
+def apply_page_operations(doc, page_ops):
+    for op in page_ops:
+        op_type = op.get('type')
+        page_index = int(op.get('page', 0))
+
+        if op_type == 'add_blank_after':
+            if doc.page_count == 0:
+                doc.new_page()
+                continue
+            page_index = max(0, min(page_index, doc.page_count - 1))
+            source = doc[page_index]
+            doc.new_page(pno=page_index + 1, width=source.rect.width, height=source.rect.height)
+
+        elif op_type == 'duplicate_page':
+            if doc.page_count == 0:
+                continue
+            page_index = max(0, min(page_index, doc.page_count - 1))
+            single_page = fitz.open()
+            single_page.insert_pdf(doc, from_page=page_index, to_page=page_index)
+            doc.insert_pdf(single_page, start_at=page_index + 1)
+            single_page.close()
+
+        elif op_type == 'delete_page':
+            if doc.page_count <= 1:
+                continue
+            page_index = max(0, min(page_index, doc.page_count - 1))
+            doc.delete_page(page_index)
+
+
 @csrf_exempt
 def edit_pdf(request):
     if request.method == 'POST':
@@ -316,6 +345,8 @@ def edit_pdf(request):
                     if os.path.exists(image_path_on_disk):
                         rect = fitz.Rect(x, y, x + width, y + height)
                         page.insert_image(rect, filename=image_path_on_disk)
+
+            apply_page_operations(doc, data.get('page_ops', []))
 
             unique_id = uuid.uuid4().hex[:8]
             original_filename_base = os.path.splitext(os.path.basename(file_path))[0]

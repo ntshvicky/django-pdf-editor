@@ -11,6 +11,7 @@ A premium, responsive web application for editing PDFs and chatting with your do
 - **PDF Editing**:
   - Select and edit existing PDF text spans.
   - Delete or replace images already embedded in the PDF.
+  - Add blank pages, duplicate pages, and delete pages from an existing PDF.
   - Add text with customizable fonts, sizes, and colors.
   - Draw shapes (rectangles, circles, lines) with various styles.
   - Insert images into your PDFs.

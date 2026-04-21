@@ -141,6 +141,15 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--txt
 .thumb-item canvas { width: 100% !important; height: auto !important; display: block; }
 .thumb-num { position: absolute; bottom: 3px; right: 5px; background: rgba(0,0,0,.55);
   color: #fff; font-size: .6rem; padding: 1px 5px; border-radius: 4px; }
+.page-actions { display: flex; gap: 5px; }
+.page-action-btn { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surf); color: var(--txt2); display: flex; align-items: center;
+  justify-content: center; cursor: pointer; font-size: 11px; transition: all .15s; }
+.page-action-btn:hover:not(:disabled) { color: var(--pri); border-color: var(--pri); background: var(--pri-bg); }
+.page-action-btn.danger:hover:not(:disabled) { color: var(--danger); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.08); }
+.page-action-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pending-pages { padding: 8px 10px; border-top: 1px solid var(--border); color: var(--txt2);
+  font-size: .72rem; line-height: 1.35; }
 
 /* ===== PDF AREA ===== */
 .pdf-area { flex: 1; overflow: auto; display: flex; justify-content: center;
@@ -480,9 +489,15 @@ select.inp { cursor: pointer; }
   <aside class="sl">
     <div class="sl-hdr">
       <span>Pages</span>
-      <span id="pg-count-lbl" style="font-size:.7rem;color:var(--txt2)">—</span>
+      <div class="page-actions">
+        <button class="page-action-btn" id="add-page-btn" title="Add blank page after current"><i class="fas fa-plus"></i></button>
+        <button class="page-action-btn" id="duplicate-page-btn" title="Duplicate current page"><i class="fas fa-copy"></i></button>
+        <button class="page-action-btn danger" id="delete-page-btn" title="Delete current page"><i class="fas fa-trash"></i></button>
+      </div>
+      <span id="pg-count-lbl" style="display:none">—</span>
     </div>
     <div class="thumbnails" id="thumbnails"></div>
+    <div class="pending-pages" id="pending-pages">No pending page changes</div>
   </aside>
 
   <!-- PDF Area -->
@@ -762,6 +777,7 @@ let clipboard = null;
 let selectedSpan = null; // for edit PDF text modal
 let contentEditMode = false;
 let pendingExistingImage = null;
+let pageOps = [];
 
 const getN = (v, d) => (typeof v === 'number' && !isNaN(v)) ? v : d;
 const shouldPreserveEditType = type => !!type && (type.startsWith('add_') || type.startsWith('replace_') || type.startsWith('remove_'));
@@ -794,9 +810,21 @@ const pageTotal = document.getElementById('page-total');
 const statusFile = document.getElementById('status-file');
 const statusPage = document.getElementById('status-page');
 const statusEdits = document.getElementById('status-edits');
+const pendingPagesEl = document.getElementById('pending-pages');
+const addPageBtn = document.getElementById('add-page-btn');
+const duplicatePageBtn = document.getElementById('duplicate-page-btn');
+const deletePageBtn = document.getElementById('delete-page-btn');
 
 function getEditCount() {
-  return Object.values(edits).filter(edit => edit && edit.type).length;
+  return Object.values(edits).filter(edit => edit && edit.type).length + pageOps.length;
+}
+
+function describePageOp(op) {
+  const page = (op.page || 0) + 1;
+  if (op.type === 'add_blank_after') return `Add blank page after ${page}`;
+  if (op.type === 'duplicate_page') return `Duplicate page ${page}`;
+  if (op.type === 'delete_page') return `Delete page ${page}`;
+  return `Page change on ${page}`;
 }
 
 function updateStatus() {
@@ -806,8 +834,14 @@ function updateStatus() {
   pageTotal.textContent = '/ ' + totalPages;
   prevPageBtn.disabled = !pdfDoc || currentPage <= 1;
   nextPageBtn.disabled = !pdfDoc || currentPage >= totalPages;
+  addPageBtn.disabled = !pdfDoc;
+  duplicatePageBtn.disabled = !pdfDoc;
+  deletePageBtn.disabled = !pdfDoc || totalPages <= 1;
   statusPage.textContent = totalPages ? `${currentPage} of ${totalPages}` : '-';
   statusEdits.textContent = getEditCount();
+  pendingPagesEl.textContent = pageOps.length
+    ? pageOps.map(describePageOp).join(' | ')
+    : 'No pending page changes';
 }
 
 // ===== TOAST =====
@@ -915,6 +949,7 @@ document.getElementById('file-input').addEventListener('change', e => {
       statusFile.textContent = d.file_name || f.name;
       edits = {}; fabricCanvasInstances = []; historyStacks = {};
       textCounter = 0; imageCounter = 0; shapeCounter = 0; currentPage = 1;
+      pageOps = [];
       contentEditMode = false; pendingExistingImage = null;
       updateStatus();
       loadPDF(filePath);
@@ -1071,6 +1106,29 @@ pageJump.addEventListener('change', () => {
   const target = Math.max(1, Math.min(pdfDoc.numPages, parseInt(pageJump.value) || currentPage));
   renderPage(target);
 });
+
+function queuePageOperation(type) {
+  if (!pdfDoc) {
+    toast('Please upload a PDF first', 'info');
+    return;
+  }
+  if (type === 'delete_page' && pdfDoc.numPages <= 1) {
+    toast('A PDF must keep at least one page', 'info');
+    return;
+  }
+  pageOps.push({ type, page: currentPage - 1 });
+  updateStatus();
+  const labels = {
+    add_blank_after: 'Blank page will be added on export.',
+    duplicate_page: 'Current page will be duplicated on export.',
+    delete_page: 'Current page will be deleted on export.',
+  };
+  toast(labels[type] || 'Page change queued.', 'success');
+}
+
+addPageBtn.addEventListener('click', () => queuePageOperation('add_blank_after'));
+duplicatePageBtn.addEventListener('click', () => queuePageOperation('duplicate_page'));
+deletePageBtn.addEventListener('click', () => queuePageOperation('delete_page'));
 
 // ===== CANVAS SETUP =====
 function setupCanvas(fc, pageNum, vp, scale) {
@@ -1845,7 +1903,7 @@ saveBtn.addEventListener('click', () => {
   }
 
   fetch('/edit/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-    body: JSON.stringify({ file_path: filePath, edits: allEdits }) })
+    body: JSON.stringify({ file_path: filePath, edits: allEdits, page_ops: pageOps }) })
     .then(r => r.json()).then(d => {
       saveBtn.innerHTML = '<i class="fas fa-download"></i> Export PDF';
       saveBtn.disabled = false;
@@ -1858,6 +1916,7 @@ saveBtn.addEventListener('click', () => {
         a.click();
         document.body.removeChild(a);
         edits = {};
+        pageOps = [];
         updateStatus();
         toast('PDF exported successfully!', 'success');
       } else { toast('Export failed: ' + (d.error || 'Unknown'), 'error'); }
