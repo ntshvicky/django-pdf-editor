@@ -782,6 +782,7 @@ let pageOps = [];
 const getN = (v, d) => (typeof v === 'number' && !isNaN(v)) ? v : d;
 const shouldPreserveEditType = type => !!type && (type.startsWith('add_') || type.startsWith('replace_') || type.startsWith('remove_'));
 const getCanvasScale = fc => (fc && fc.pdfScale) || 1;
+const isUiOnlyObject = obj => !!obj && (obj.uiOnly || obj.objType === 'existing_text' || obj.objType === 'existing_image');
 
 // ===== DOM REFS =====
 const pdfArea = document.getElementById('pdf-area');
@@ -1059,7 +1060,7 @@ function saveHistory(idx) {
   const fc = fabricCanvasInstances[idx];
   if (!fc) return;
   const s = historyStacks[idx];
-  s.undo.push(fc.toJSON(['id', 'objType', 'origX', 'origY', 'origX2', 'origY2']));
+  s.undo.push(fc.toJSON(['id', 'objType', 'pdfContent', 'uiOnly', 'origX', 'origY', 'origX2', 'origY2']));
   s.redo = [];
   updateHistoryBtns(idx);
   updateStatus();
@@ -1390,6 +1391,7 @@ function addExistingOverlay(fc, item, scale) {
     id,
     objType: isText ? 'existing_text' : 'existing_image',
     pdfContent: item,
+    uiOnly: true,
     selectable: true,
     hasRotatingPoint: false,
     cornerStyle: 'circle',
@@ -1438,9 +1440,30 @@ function existingEditFromObject(obj, type, extra = {}) {
 function previewExistingRemoval(obj) {
   const fc = getActiveCanvas();
   if (!fc || !obj) return;
-  obj.set({ fill: 'rgba(255,255,255,0.86)', stroke: '#ef4444', strokeDashArray: [2, 2], selectable: false, evented: false });
+  obj.set({ fill: 'rgba(255,255,255,0.9)', stroke: '#ef4444', strokeDashArray: [2, 2], selectable: false, evented: false, uiOnly: true });
   fc.discardActiveObject();
   fc.renderAll();
+}
+
+function addWhiteoutPreview(fc, span, scale, id) {
+  if (!fc || !span) return;
+  const whiteout = new fabric.Rect({
+    left: (span.x - 1) * scale,
+    top: (span.y - 1) * scale,
+    width: (span.width + 2) * scale,
+    height: (span.height + 2) * scale,
+    fill: 'rgba(255,255,255,0.9)',
+    stroke: '#ef4444',
+    strokeDashArray: [2, 2],
+    strokeWidth: 1,
+    id: `${id}_whiteout_preview`,
+    objType: 'replacement_preview',
+    uiOnly: true,
+    selectable: false,
+    evented: false,
+  });
+  fc.add(whiteout);
+  whiteout.sendToBack();
 }
 
 function deleteExistingContent(obj = getActiveObj()) {
@@ -1807,7 +1830,11 @@ document.getElementById('modal-confirm').addEventListener('click', () => {
     fontsize: selectedSpan.fontsize, color: selectedSpan.color || '#000000', font: 'Helvetica' };
 
   const existingOverlay = fc?.getObjects().find(o => o.pdfContent && o.pdfContent.id === selectedSpan.id);
-  if (existingOverlay) previewExistingRemoval(existingOverlay);
+  if (existingOverlay) {
+    previewExistingRemoval(existingOverlay);
+  } else {
+    addWhiteoutPreview(fc, selectedSpan, scale, id);
+  }
   saveHistory(currentPage - 1);
   document.getElementById('edit-text-modal').classList.remove('open');
   toast('Text replacement queued. Export PDF to apply.', 'success');
@@ -1861,6 +1888,7 @@ saveBtn.addEventListener('click', () => {
     if (!fc) return;
     const scale = getCanvasScale(fc);
     fc.forEachObject(obj => {
+      if (isUiOnlyObject(obj)) return;
       const id = obj.id; if (!id) return;
       const cur = edits[id] || {};
       const type = shouldPreserveEditType(cur.type) ? cur.type : 'edit_' + obj.type;
