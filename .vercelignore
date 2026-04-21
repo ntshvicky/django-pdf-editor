@@ -1,0 +1,12 @@
+.git
+.vercel
+env
+venv
+__pycache__
+*.pyc
+db.sqlite3
+media
+staticfiles
+.env
+pyproject.toml
+uv.lock
