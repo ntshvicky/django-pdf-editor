@@ -2,7 +2,8 @@ import uuid
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from .models import PDFDocument
+from django.core.files.storage import FileSystemStorage
+from django.utils.text import get_valid_filename
 import fitz  # PyMuPDF
 import os
 from django.conf import settings
@@ -16,6 +17,10 @@ except ImportError:
     genai = None
 
 load_dotenv()
+
+MAX_PDF_SIZE = 25 * 1024 * 1024
+MAX_IMAGE_SIZE = 10 * 1024 * 1024
+ALLOWED_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp'}
 
 FONT_FILES = {
     'Arial': os.path.join(settings.MEDIA_ROOT, 'fonts', 'Arial.ttf'),
@@ -35,19 +40,51 @@ BUILTIN_FONTS = {
 }
 
 
+def media_path_from_url(file_path):
+    relative_path = (file_path or '').replace(settings.MEDIA_URL, '', 1).lstrip('/')
+    full_path = os.path.abspath(os.path.join(settings.MEDIA_ROOT, relative_path))
+    media_root = os.path.abspath(settings.MEDIA_ROOT)
+    if not full_path.startswith(media_root + os.sep):
+        raise ValueError('Invalid media path')
+    return full_path
+
+
 @csrf_exempt
 def upload_pdf(request):
     if request.method == 'POST':
         if 'file' not in request.FILES:
             return JsonResponse({'error': 'No file uploaded'}, status=400)
         pdf_file = request.FILES['file']
-        document = PDFDocument.objects.create(file=pdf_file)
-        document.save()
-        return JsonResponse({'file_path': document.file.url})
+        original_name = get_valid_filename(pdf_file.name or 'document.pdf')
+        if not original_name.lower().endswith('.pdf'):
+            return JsonResponse({'error': 'Only PDF files are supported'}, status=400)
+        if pdf_file.size > MAX_PDF_SIZE:
+            return JsonResponse({'error': 'PDF must be 25 MB or smaller'}, status=400)
+
+        upload_dir = os.path.join(settings.MEDIA_ROOT, 'pdfs')
+        os.makedirs(upload_dir, exist_ok=True)
+        storage = FileSystemStorage(location=upload_dir, base_url=settings.MEDIA_URL + 'pdfs/')
+        file_name = storage.save(f"{uuid.uuid4().hex[:8]}_{original_name}", pdf_file)
+        full_path = storage.path(file_name)
+
+        try:
+            with fitz.open(full_path) as doc:
+                page_count = doc.page_count
+        except Exception:
+            storage.delete(file_name)
+            return JsonResponse({'error': 'Uploaded file is not a valid PDF'}, status=400)
+
+        return JsonResponse({
+            'file_path': storage.url(file_name),
+            'file_name': original_name,
+            'page_count': page_count,
+        })
     return render(request, 'editor/upload.html')
 
 
 def normalize_color(color):
+    if color == 'transparent':
+        return None
     if not color or not isinstance(color, str) or len(color) != 7 or not color.startswith('#'):
         return (0.0, 0.0, 0.0)
     try:
@@ -83,10 +120,7 @@ def edit_pdf(request):
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
-            file_path_str = data['file_path']
-            if file_path_str.startswith('/media/'):
-                file_path_str = file_path_str[7:]
-            file_path = os.path.join(settings.MEDIA_ROOT, file_path_str)
+            file_path = media_path_from_url(data['file_path'])
             doc = fitz.open(file_path)
 
             final_object_states = {}
@@ -166,7 +200,7 @@ def edit_pdf(request):
 
                     rect = fitz.Rect(x, y, x + width, y + height)
                     page.draw_rect(rect, color=stroke_color if stroke_width > 0 else None,
-                                   fill=color, fill_opacity=opacity, width=stroke_width)
+                                   fill=color, fill_opacity=opacity if color else 0, width=stroke_width)
 
                 elif 'circle' in edit_type:
                     x = float(edit.get('x', 0.0))
@@ -179,7 +213,7 @@ def edit_pdf(request):
 
                     center = fitz.Point(x + radius, y + radius)
                     page.draw_circle(center, radius, color=stroke_color if stroke_width > 0 else None,
-                                     fill=color, fill_opacity=opacity, width=stroke_width)
+                                     fill=color, fill_opacity=opacity if color else 0, width=stroke_width)
 
                 elif 'triangle' in edit_type:
                     x = float(edit.get('x', 0.0))
@@ -195,7 +229,7 @@ def edit_pdf(request):
                     p2 = fitz.Point(x, y + height)
                     p3 = fitz.Point(x + width, y + height)
                     page.draw_polygon([p1, p2, p3], color=stroke_color if stroke_width > 0 else None,
-                                      fill=color, fill_opacity=opacity, width=stroke_width)
+                                      fill=color, fill_opacity=opacity if color else 0, width=stroke_width)
 
                 elif 'arrow' in edit_type:
                     x1 = float(edit.get('x1', 0.0))
@@ -277,8 +311,12 @@ def upload_image(request):
         if 'file' not in request.FILES:
             return JsonResponse({'error': 'No file uploaded'}, status=400)
         image_file = request.FILES['file']
-        original_filename = os.path.splitext(image_file.name)[0]
-        file_extension = os.path.splitext(image_file.name)[1]
+        original_filename = get_valid_filename(os.path.splitext(image_file.name)[0] or 'image')
+        file_extension = os.path.splitext(image_file.name)[1].lower()
+        if file_extension not in ALLOWED_IMAGE_EXTENSIONS:
+            return JsonResponse({'error': 'Only PNG, JPG, JPEG, and WEBP images are supported'}, status=400)
+        if image_file.size > MAX_IMAGE_SIZE:
+            return JsonResponse({'error': 'Image must be 10 MB or smaller'}, status=400)
         image_name = f"{uuid.uuid4().hex[:8]}_{original_filename}{file_extension}"
 
         image_dir = os.path.join(settings.MEDIA_ROOT, 'images')
@@ -302,7 +340,7 @@ def extract_text_blocks(request):
             file_path = data.get('file_path')
             page_number = int(data.get('page', 0))
 
-            full_file_path = os.path.join(settings.MEDIA_ROOT, file_path.replace('/media/', '', 1))
+            full_file_path = media_path_from_url(file_path)
             if not os.path.exists(full_file_path):
                 return JsonResponse({'status': 'failed', 'error': 'File not found'}, status=404)
 
@@ -369,7 +407,7 @@ def chat_pdf(request):
             if not file_path or not message:
                 return JsonResponse({'status': 'failed', 'error': 'Missing file path or message'}, status=400)
 
-            full_file_path = os.path.join(settings.MEDIA_ROOT, file_path.replace('/media/', '', 1))
+            full_file_path = media_path_from_url(file_path)
             if not os.path.exists(full_file_path):
                 return JsonResponse({'status': 'failed', 'error': 'File not found'}, status=404)
 

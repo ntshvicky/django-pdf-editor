@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.9.359/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/4.4.0/fabric.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.3/dist/purify.min.js"></script>
 <style>
 :root {
   --h: 60px; --tb: 52px; --sl: 180px; --sr: 310px;
@@ -57,6 +58,11 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--txt
 .zoom-val { min-width: 46px; text-align: center; font-size: .8rem; font-weight: 600;
   color: var(--txt2); cursor: pointer; padding: 4px 6px; border-radius: 6px; }
 .zoom-val:hover { background: var(--bg); }
+.page-chip { display: flex; align-items: center; gap: 5px; padding: 4px 7px;
+  border: 1px solid var(--border); border-radius: 8px; color: var(--txt2);
+  background: var(--surf); font-size: .78rem; }
+.page-chip input { width: 42px; border: none; background: var(--bg); color: var(--txt);
+  border-radius: 6px; padding: 4px 6px; text-align: center; font: inherit; outline: none; }
 .hdr-sep { width: 1px; height: 22px; background: var(--border); margin: 0 6px; }
 .file-badge { display: flex; align-items: center; gap: 6px; padding: 4px 10px;
   background: var(--pri-bg); border-radius: 20px; font-size: .78rem; font-weight: 500;
@@ -175,6 +181,14 @@ body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--txt
 .sr-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .tab-pane { display: none; padding: 16px; }
 .tab-pane.active { display: block; }
+.doc-status { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surf2); }
+.status-cell { border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  min-width: 0; background: var(--surf); }
+.status-label { display: block; color: var(--txt2); font-size: .66rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.status-val { display: block; color: var(--txt); font-size: .82rem; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ===== PROPERTIES PANEL ===== */
 .no-sel { display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -349,6 +363,27 @@ select.inp { cursor: pointer; }
   padding: 40px; width: 100%; flex-direction: column; gap: 14px; color: var(--txt2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 1s linear infinite; }
+
+@media (max-width: 1100px) {
+  :root { --sl: 128px; --sr: 280px; }
+  .brand-name { display: none; }
+  .file-badge { max-width: 150px; }
+}
+
+@media (max-width: 820px) {
+  :root { --h: 112px; --sr: 100vw; }
+  body { overflow: auto; }
+  .hdr { flex-wrap: wrap; height: var(--h); align-content: center; }
+  .hdr-mid { order: 3; width: 100%; justify-content: center; }
+  .hdr-actions { margin-left: auto; }
+  .layout { flex-direction: column; height: auto; min-height: calc(100vh - var(--total)); }
+  .sl { width: 100%; height: 132px; border-right: none; border-bottom: 1px solid var(--border); }
+  .thumbnails { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .thumb-item { width: 74px; flex-shrink: 0; }
+  .pdf-area { min-height: 58vh; padding: 16px; }
+  .sr { width: 100%; min-height: 360px; border-left: none; border-top: 1px solid var(--border); }
+  .chat-wrap { height: 360px; }
+}
 </style>
 </head>
 <body>
@@ -370,6 +405,13 @@ select.inp { cursor: pointer; }
       <span class="zoom-val" id="zoom-val" title="Reset Zoom">100%</span>
       <button class="btn-icon" id="zoom-in" title="Zoom In"><i class="fas fa-plus"></i></button>
       <button class="btn-icon" id="zoom-fit" title="Fit Width"><i class="fas fa-expand-arrows-alt"></i></button>
+    </div>
+    <div class="hdr-sep"></div>
+    <div class="page-chip">
+      <button class="btn-icon" id="prev-page" title="Previous Page"><i class="fas fa-chevron-left"></i></button>
+      <input type="number" id="page-jump" min="1" value="1" title="Page number">
+      <span id="page-total">/ 0</span>
+      <button class="btn-icon" id="next-page" title="Next Page"><i class="fas fa-chevron-right"></i></button>
     </div>
     <div class="hdr-sep"></div>
     <div class="hist-group">
@@ -452,6 +494,20 @@ select.inp { cursor: pointer; }
     <div class="sr-tabs">
       <button class="sr-tab active" data-tab="props"><i class="fas fa-sliders-h"></i> Properties</button>
       <button class="sr-tab" data-tab="chat"><i class="fas fa-robot"></i> AI Chat</button>
+    </div>
+    <div class="doc-status">
+      <div class="status-cell">
+        <span class="status-label">File</span>
+        <span class="status-val" id="status-file">None</span>
+      </div>
+      <div class="status-cell">
+        <span class="status-label">Page</span>
+        <span class="status-val" id="status-page">-</span>
+      </div>
+      <div class="status-cell">
+        <span class="status-label">Edits</span>
+        <span class="status-val" id="status-edits">0</span>
+      </div>
     </div>
     <div class="sr-body">
       <!-- Properties tab -->
@@ -712,6 +768,28 @@ const fillPicker = document.getElementById('fill-picker');
 const fillSwatch = document.getElementById('fill-swatch');
 const strokePicker = document.getElementById('stroke-picker');
 const strokeSwatch = document.getElementById('stroke-swatch');
+const prevPageBtn = document.getElementById('prev-page');
+const nextPageBtn = document.getElementById('next-page');
+const pageJump = document.getElementById('page-jump');
+const pageTotal = document.getElementById('page-total');
+const statusFile = document.getElementById('status-file');
+const statusPage = document.getElementById('status-page');
+const statusEdits = document.getElementById('status-edits');
+
+function getEditCount() {
+  return Object.values(edits).filter(edit => edit && edit.type).length;
+}
+
+function updateStatus() {
+  const totalPages = pdfDoc ? pdfDoc.numPages : 0;
+  pageJump.value = currentPage;
+  pageJump.max = Math.max(totalPages, 1);
+  pageTotal.textContent = '/ ' + totalPages;
+  prevPageBtn.disabled = !pdfDoc || currentPage <= 1;
+  nextPageBtn.disabled = !pdfDoc || currentPage >= totalPages;
+  statusPage.textContent = totalPages ? `${currentPage} of ${totalPages}` : '-';
+  statusEdits.textContent = getEditCount();
+}
 
 // ===== TOAST =====
 function toast(msg, type = 'info') {
@@ -780,11 +858,25 @@ opacitySlider.addEventListener('input', () => opacityLbl.textContent = opacitySl
 // ===== FILE UPLOAD =====
 document.getElementById('file-input').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
+  if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) {
+    toast('Please choose a PDF file', 'error');
+    e.target.value = '';
+    return;
+  }
+  if (f.size > 25 * 1024 * 1024) {
+    toast('PDF must be 25 MB or smaller', 'error');
+    e.target.value = '';
+    return;
+  }
   emptyState.innerHTML = '<div class="loading-overlay"><i class="fas fa-spinner spin" style="font-size:2rem;color:var(--pri)"></i><p>Uploading PDF…</p></div>';
   const fd = new FormData();
   fd.append('file', f);
   fetch('/upload/', { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd })
-    .then(r => r.json())
+    .then(async r => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Upload failed');
+      return d;
+    })
     .then(d => {
       filePath = d.file_path;
       emptyState.style.display = 'none';
@@ -793,14 +885,19 @@ document.getElementById('file-input').addEventListener('change', e => {
       sendBtn.disabled = false;
       fileBadge.style.display = 'flex';
       fileNameLbl.textContent = f.name.length > 22 ? f.name.slice(0, 19) + '…' : f.name;
+      statusFile.textContent = d.file_name || f.name;
       edits = {}; fabricCanvasInstances = []; historyStacks = {};
       textCounter = 0; imageCounter = 0; shapeCounter = 0; currentPage = 1;
+      updateStatus();
       loadPDF(filePath);
       chatMsgs.innerHTML = `<div class="msg system">PDF uploaded! Ask me anything about it.</div>
         <div class="msg ai">Hi! I've read your PDF. What would you like to know?</div>`;
       toast('PDF uploaded successfully!', 'success');
     })
-    .catch(() => { emptyState.innerHTML = '<div class="loading-overlay" style="color:var(--danger)"><i class="fas fa-exclamation-circle" style="font-size:2rem"></i><p>Upload failed. Please try again.</p></div>'; toast('Upload failed', 'error'); });
+    .catch(err => {
+      emptyState.innerHTML = '<div class="loading-overlay" style="color:var(--danger)"><i class="fas fa-exclamation-circle" style="font-size:2rem"></i><p>Upload failed. Please try again.</p></div>';
+      toast(err.message || 'Upload failed', 'error');
+    });
   e.target.value = '';
 });
 
@@ -812,6 +909,7 @@ function loadPDF(url) {
     pgCountLbl.textContent = doc.numPages + ' pages';
     fabricCanvasInstances.length = doc.numPages;
     fabricCanvasInstances.fill(null);
+    updateStatus();
     renderThumbnails();
     renderPage(1);
   }).catch(() => toast('Could not load PDF', 'error'));
@@ -845,6 +943,7 @@ function renderThumb(n, c) {
 
 function renderPage(n) {
   currentPage = n;
+  updateStatus();
   document.querySelectorAll('.thumb-item').forEach(t => t.classList.toggle('active', +t.dataset.page === n));
   pdfArea.innerHTML = '';
 
@@ -885,6 +984,7 @@ function renderPage(n) {
       applyEdits(fc, n - 1, scale);
       if (!historyStacks[n - 1]) historyStacks[n - 1] = { undo: [], redo: [] };
       saveHistory(n - 1);
+      updateStatus();
     });
   });
 }
@@ -897,6 +997,7 @@ function saveHistory(idx) {
   s.undo.push(fc.toJSON(['id', 'objType', 'origX', 'origY', 'origX2', 'origY2']));
   s.redo = [];
   updateHistoryBtns(idx);
+  updateStatus();
 }
 function updateHistoryBtns(idx) {
   const s = historyStacks[idx];
@@ -934,6 +1035,13 @@ document.getElementById('zoom-in').addEventListener('click', () => setZoom(zoomS
 document.getElementById('zoom-out').addEventListener('click', () => setZoom(zoomScale - 0.15));
 document.getElementById('zoom-fit').addEventListener('click', () => setZoom(1.0));
 zoomValEl.addEventListener('click', () => setZoom(1.0));
+prevPageBtn.addEventListener('click', () => { if (pdfDoc && currentPage > 1) renderPage(currentPage - 1); });
+nextPageBtn.addEventListener('click', () => { if (pdfDoc && currentPage < pdfDoc.numPages) renderPage(currentPage + 1); });
+pageJump.addEventListener('change', () => {
+  if (!pdfDoc) return updateStatus();
+  const target = Math.max(1, Math.min(pdfDoc.numPages, parseInt(pageJump.value) || currentPage));
+  renderPage(target);
+});
 
 // ===== CANVAS SETUP =====
 function setupCanvas(fc, pageNum, vp, scale) {
@@ -1174,11 +1282,25 @@ function applyEdits(fc, idx, scale) {
 const imageInput = document.getElementById('image-input');
 imageInput.addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
+  if (!/^image\/(png|jpe?g|webp)$/i.test(f.type)) {
+    toast('Choose a PNG, JPG, JPEG, or WEBP image', 'error');
+    e.target.value = '';
+    return;
+  }
+  if (f.size > 10 * 1024 * 1024) {
+    toast('Image must be 10 MB or smaller', 'error');
+    e.target.value = '';
+    return;
+  }
   const fd = new FormData(); fd.append('file', f);
   fetch('/upload_image/', { method: 'POST', headers: { 'X-CSRFToken': csrfToken }, body: fd })
-    .then(r => r.json())
+    .then(async r => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Image upload failed');
+      return d;
+    })
     .then(d => addImageToCanvas(d.image_path))
-    .catch(() => toast('Image upload failed', 'error'));
+    .catch(err => toast(err.message || 'Image upload failed', 'error'));
   e.target.value = '';
 });
 
@@ -1397,7 +1519,14 @@ function renderSpanList(spans) {
   spans.forEach(span => {
     const item = document.createElement('div');
     item.className = 'span-list-item';
-    item.innerHTML = `<div class="span-text">${span.text}</div><div class="span-meta">${span.fontsize}pt · p${currentPage}</div>`;
+    const spanText = document.createElement('div');
+    spanText.className = 'span-text';
+    spanText.textContent = span.text;
+    const spanMeta = document.createElement('div');
+    spanMeta.className = 'span-meta';
+    spanMeta.textContent = `${span.fontsize}pt · p${currentPage}`;
+    item.appendChild(spanText);
+    item.appendChild(spanMeta);
     item.addEventListener('click', () => {
       document.querySelectorAll('.span-list-item').forEach(x => x.classList.remove('selected'));
       item.classList.add('selected');
@@ -1449,7 +1578,8 @@ function appendMsg(text, type) {
     d.id = 'typing-msg';
     d.innerHTML = '<div class="typing-dot"><span></span><span></span><span></span></div>';
   } else if (type === 'ai' && typeof marked !== 'undefined') {
-    d.innerHTML = marked.parse(text);
+    const html = marked.parse(text);
+    d.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
   } else {
     d.textContent = text;
   }
@@ -1543,6 +1673,8 @@ saveBtn.addEventListener('click', () => {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+        edits = {};
+        updateStatus();
         toast('PDF exported successfully!', 'success');
       } else { toast('Export failed: ' + (d.error || 'Unknown'), 'error'); }
     }).catch(() => {
@@ -1607,6 +1739,8 @@ document.addEventListener('keydown', e => {
     hideProps(); saveHistory(currentPage - 1);
   }
 });
+
+updateStatus();
 
 // drag & drop PDF onto viewer
 pdfArea.addEventListener('dragover', e => { e.preventDefault(); pdfArea.style.outline = '3px dashed var(--pri)'; });

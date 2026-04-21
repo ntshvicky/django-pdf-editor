@@ -1,7 +1,7 @@
 whitenoise
-django 
-pymupdf 
-pillow 
+django==4.2.13
+pymupdf
+pillow
 reportlab
 google-genai
 python-dotenv
